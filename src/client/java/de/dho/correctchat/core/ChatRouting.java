@@ -31,6 +31,10 @@ final class ChatRouting {
                     + ".*\\[\\s*(?:x\\s*)?\\d+\\s*/\\s*\\d+\\s*\\]"
                     + "|\\[vl:\\s*\\d+\\].*\\[ping:\\s*\\d+\\].*\\[tps:",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern OPSUCHT_ANTICHEAT_ALERT = Pattern.compile(
+            "(?:\\(\\s*\\d+\\s*ms\\s*\\)\\s+benutzt\\b|\\bwurde\\s+bestraft\\s+für\\b)"
+                    + ".+\\([^()\\r\\n]+/[a-z0-9]+\\)(?:\\s*\\[\\s*(?:x\\s*)?\\d+\\s*/\\s*\\d+\\s*\\])?",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final List<String> VULCAN_MESSAGE_MARKERS = List.of(
             "violations for all online players were reset",
             "was setback for being in an unloaded chunk",
@@ -135,6 +139,7 @@ final class ChatRouting {
             if (normalized.equals("coreprotect") && text.contains("coreprotect")) return true;
             if (normalized.equals("vulcan") && (text.contains("vulcan")
                     || VULCAN_ALERT.matcher(text).find()
+                    || OPSUCHT_ANTICHEAT_ALERT.matcher(text).find()
                     || VULCAN_MESSAGE_MARKERS.stream().anyMatch(text::contains)
                     || hasVulcanClickAction(component, 0))) return true;
             if (normalized.equals("worldedit") && (text.contains("worldedit")

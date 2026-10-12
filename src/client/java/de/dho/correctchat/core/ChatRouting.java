@@ -53,8 +53,8 @@ final class ChatRouting {
                     List<CorrectChatConfig.ChatTab> allTabs) {
         if (tab == null) return true;
         String text = component.getString();
-        if (matchesExplicitRoute(tab, component, text)) return true;
-        if (hasExplicitRoute(component, text, allTabs)) return false;
+        if (matchesExplicitRoute(tab, component, text, kind)) return true;
+        if (hasExplicitRoute(component, text, kind, allTabs)) return false;
         return tab.filters.stream().anyMatch(filter -> matchesFilter(filter, component, text, kind));
     }
 
@@ -147,17 +147,23 @@ final class ChatRouting {
         };
     }
 
-    private boolean hasExplicitRoute(Component component, String text, List<CorrectChatConfig.ChatTab> tabs) {
-        return tabs.stream().anyMatch(candidate -> matchesExplicitRoute(candidate, component, text));
+    private boolean hasExplicitRoute(Component component, String text, ChatWorkspace.Kind kind,
+                                     List<CorrectChatConfig.ChatTab> tabs) {
+        return tabs.stream().anyMatch(candidate -> matchesExplicitRoute(candidate, component, text, kind));
     }
 
-    private boolean matchesExplicitRoute(CorrectChatConfig.ChatTab tab, Component component, String text) {
+    private boolean matchesExplicitRoute(CorrectChatConfig.ChatTab tab, Component component, String text,
+                                         ChatWorkspace.Kind kind) {
         if (tab.routingRules.stream().anyMatch(rule -> regexMatches(rule, text))) return true;
-        return tab.filters.stream().anyMatch(filter -> matchesExplicitFilter(filter, component, text));
+        return tab.filters.stream().anyMatch(filter -> matchesExplicitFilter(filter, component, text, kind));
     }
 
-    private boolean matchesExplicitFilter(CorrectChatConfig.TabFilter filter, Component component, String text) {
+    private boolean matchesExplicitFilter(CorrectChatConfig.TabFilter filter, Component component, String text,
+                                          ChatWorkspace.Kind kind) {
         return switch (filter.type) {
+            // Dedicated non-player streams must not leak into the catch-all tab.
+            case SYSTEM -> kind == ChatWorkspace.Kind.SYSTEM;
+            case TWITCH -> kind == ChatWorkspace.Kind.TWITCH;
             case REGEX -> !filter.value.isBlank() && regexMatches(filter.value, text);
             case CONTAINS -> !filter.value.isBlank()
                     && text.toLowerCase(Locale.ROOT).contains(filter.value.toLowerCase(Locale.ROOT));

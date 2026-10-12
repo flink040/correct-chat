@@ -55,6 +55,8 @@ Farbcodes in der aktuellen Eingabe werden direkt oberhalb der Eingabezeile als V
 
 Beim ersten Start ohne bestehende `config/correct-chat.json` werden kompatible Werte automatisch aus `labymod-neo/configs/{anticommandchoker,chatlog,chattime,chatutilities}/settings.json` übernommen. Tabs, Fenster, Ersetzungen und Listener lassen sich anschließend im Mod-Menü bearbeiten. Standardmäßig gibt es die Tabs „Alle“, „Spieler“, „System“ und „Twitch“ sowie ein rechtes Systemfenster.
 
+System-/Servermeldungen und Twitch-Nachrichten werden als eigene Nachrichtenströme behandelt. Sobald dafür ein aktiver Tab existiert, erscheinen sie nicht zusätzlich im Auffang-Tab „Alle“. Konkrete Text-, Regex- und Mod-Routen bleiben ebenfalls exklusiv; normaler Spielerchat bleibt ohne eine solche Route in „Alle“ sichtbar.
+
 Unter „Twitch“ kann ein Kanal eingetragen und die Verbindung aktiviert werden. Der Twitch-Tab liest den Chat auch ohne Anmeldung. Zum Schreiben werden der Twitch-Benutzername und ein User-Access-Token mit den IRC-Berechtigungen `chat:read` und `chat:edit` benötigt. Der Token wird lokal in `config/correct-chat.json` gespeichert, in der Oberfläche aber nicht im Klartext vorbefüllt. Solange der Twitch-Tab im Hauptchat aktiv ist, werden normale Eingaben und Twitch-Kommandos wie `/me` an Twitch statt an den Minecraft-Server gesendet.
 
 ## Bauen

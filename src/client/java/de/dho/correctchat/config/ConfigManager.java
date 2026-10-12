@@ -17,12 +17,24 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 public final class ConfigManager {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
     private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("correct-chat.json");
     private static final Path BACKUP_PATH = PATH.resolveSibling(PATH.getFileName() + ".bak");
     private static final DateTimeFormatter CORRUPT_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    private static final Object WRITE_LOCK = new Object();
+    private static final ScheduledExecutorService SAVE_EXECUTOR = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "correct-chat-config");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private static ScheduledFuture<?> pendingSave;
+    private static long saveRevision;
 
     private ConfigManager() {
     }
@@ -59,8 +71,34 @@ public final class ConfigManager {
 
     public static void save(CorrectChatConfig config, Logger logger) {
         config.normalize();
+        CorrectChatConfig snapshot = config.copy();
+        long revision;
+        synchronized (ConfigManager.class) {
+            revision = ++saveRevision;
+            if (pendingSave != null) pendingSave.cancel(false);
+            pendingSave = null;
+        }
+        persist(snapshot, logger, revision);
+    }
+
+    public static void saveLater(CorrectChatConfig config, Logger logger) {
+        config.normalize();
+        CorrectChatConfig snapshot = config.copy();
+        synchronized (ConfigManager.class) {
+            long revision = ++saveRevision;
+            if (pendingSave != null) pendingSave.cancel(false);
+            pendingSave = SAVE_EXECUTOR.schedule(() -> persist(snapshot, logger, revision), 250, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private static void persist(CorrectChatConfig config, Logger logger, long revision) {
         try {
-            writeAtomic(config, true);
+            synchronized (WRITE_LOCK) {
+                synchronized (ConfigManager.class) {
+                    if (revision != saveRevision) return;
+                }
+                writeAtomic(config, true);
+            }
         } catch (Exception exception) {
             logger.error("Unable to save {}", PATH, exception);
         }

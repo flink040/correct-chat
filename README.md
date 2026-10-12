@@ -66,7 +66,7 @@ $env:JAVA_HOME='C:\path\to\jdk-25'
 .\gradlew.bat build
 ```
 
-Das fertige Mod-JAR liegt unter `build/libs/correct-chat-0.1.0.jar`.
+Das fertige Mod-JAR liegt unter `build/libs/correct-chat-0.1.1.jar`.
 
 ## Projektstruktur
 

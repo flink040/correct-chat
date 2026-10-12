@@ -99,6 +99,7 @@ public final class ChatWorkspace {
     }
 
     public void onConfigChanged() {
+        routing.clear();
         ensureEnabledTabSelection();
         trim();
         applyPrimaryFilter();
@@ -338,7 +339,7 @@ public final class ChatWorkspace {
         resizedWindow = -1;
         resizeWidth = false;
         resizeHeight = false;
-        ConfigManager.save(CorrectChatClient.config(), CorrectChatClient.LOGGER);
+        ConfigManager.saveLater(CorrectChatClient.config(), CorrectChatClient.LOGGER);
         if (primaryResized) Minecraft.getInstance().options.save();
         if ((primaryResized || resized) && rebuildChatWidgets != null) rebuildChatWidgets.run();
         return true;
@@ -423,7 +424,7 @@ public final class ChatWorkspace {
         else if (windowIndex < windows.size()) windows.get(windowIndex).activeTabId = tabId;
         unreadByTab.remove(tabId);
         mentionedTabs.remove(tabId);
-        ConfigManager.save(config, CorrectChatClient.LOGGER);
+        ConfigManager.saveLater(config, CorrectChatClient.LOGGER);
         applyPrimaryFilter();
     }
 
@@ -609,6 +610,9 @@ public final class ChatWorkspace {
     private void trim() {
         CorrectChatConfig config = CorrectChatClient.config();
         int maximum = config == null ? 1000 : config.maxStoredMessages;
-        history.trim(maximum).forEach(componentMods::remove);
+        history.trim(maximum).forEach(component -> {
+            componentMods.remove(component);
+            routing.forget(component);
+        });
     }
 }

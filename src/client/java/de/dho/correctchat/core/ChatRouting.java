@@ -6,6 +6,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 
 import java.util.List;
+import java.util.EnumMap;
+import java.util.IdentityHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -44,6 +46,8 @@ final class ChatRouting {
 
     private final Map<Component, String> componentMods;
     private final RegexCache regexes = new RegexCache();
+    private final IdentityHashMap<Component, EnumMap<ChatWorkspace.Kind, IdentityHashMap<CorrectChatConfig.ChatTab, Boolean>>>
+            matchResults = new IdentityHashMap<>();
 
     ChatRouting(Map<Component, String> componentMods) {
         this.componentMods = componentMods;
@@ -52,6 +56,28 @@ final class ChatRouting {
     boolean matches(CorrectChatConfig.ChatTab tab, Component component, ChatWorkspace.Kind kind,
                     List<CorrectChatConfig.ChatTab> allTabs) {
         if (tab == null) return true;
+        EnumMap<ChatWorkspace.Kind, IdentityHashMap<CorrectChatConfig.ChatTab, Boolean>> byKind =
+                matchResults.computeIfAbsent(component, ignored -> new EnumMap<>(ChatWorkspace.Kind.class));
+        IdentityHashMap<CorrectChatConfig.ChatTab, Boolean> byTab =
+                byKind.computeIfAbsent(kind, ignored -> new IdentityHashMap<>());
+        Boolean cached = byTab.get(tab);
+        if (cached != null) return cached;
+        boolean result = matchesUncached(tab, component, kind, allTabs);
+        byTab.put(tab, result);
+        return result;
+    }
+
+    void clear() {
+        matchResults.clear();
+        regexes.clear();
+    }
+
+    void forget(Component component) {
+        matchResults.remove(component);
+    }
+
+    private boolean matchesUncached(CorrectChatConfig.ChatTab tab, Component component, ChatWorkspace.Kind kind,
+                                    List<CorrectChatConfig.ChatTab> allTabs) {
         String text = component.getString();
         if (matchesExplicitRoute(tab, component, text, kind)) return true;
         if (hasExplicitRoute(component, text, kind, allTabs)) return false;

@@ -27,14 +27,21 @@ final class ChatHistoryStore {
 
     private final Deque<Entry> entries = new ArrayDeque<>();
     private final Map<Component, ChatWorkspace.Kind> componentKinds = new IdentityHashMap<>();
+    private List<Entry> snapshot = List.of();
+    private boolean snapshotDirty;
 
     void add(Component component, ChatWorkspace.Kind kind, String server) {
         entries.addLast(new Entry(component, kind, System.currentTimeMillis(), server));
         componentKinds.put(component, kind);
+        snapshotDirty = true;
     }
 
     List<Entry> snapshot() {
-        return new ArrayList<>(entries);
+        if (snapshotDirty) {
+            snapshot = List.copyOf(entries);
+            snapshotDirty = false;
+        }
+        return snapshot;
     }
 
     ChatWorkspace.Kind kindOf(Component component, ChatWorkspace.Kind fallback) {
@@ -48,6 +55,7 @@ final class ChatHistoryStore {
             componentKinds.remove(entry.component);
             removed.add(entry.component);
         }
+        if (!removed.isEmpty()) snapshotDirty = true;
         return removed;
     }
 }

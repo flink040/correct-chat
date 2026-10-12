@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "correctchat",
+  "version": "${version}",
+  "name": "Correct Chat",
+  "description": "Fabric port of AntiCommandChoker, ChatLog, ChatTime and Chat Utilities.",
+  "authors": ["dho", "port based on addons by kadse, HDSkins, JumpingPxl and Fesa"],
+  "license": "All-Rights-Reserved",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["de.dho.correctchat.CorrectChatClient"],
+    "modmenu": ["de.dho.correctchat.compat.CorrectChatModMenu"]
+  },
+  "mixins": [
+    "correctchat.client.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": ">=0.160.0+26.2"
+  },
+  "suggests": {
+    "modmenu": ">=20.0.0"
+  }
+}

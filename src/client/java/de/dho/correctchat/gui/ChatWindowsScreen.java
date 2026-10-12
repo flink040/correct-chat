@@ -1,0 +1,151 @@
+package de.dho.correctchat.gui;
+
+import de.dho.correctchat.CorrectChatClient;
+import de.dho.correctchat.config.CorrectChatConfig;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
+
+import java.util.ArrayList;
+import java.util.List;
+
+final class ChatWindowsScreen extends Screen {
+    private final Screen parent;
+    private final CorrectChatConfig config;
+    private final List<CorrectChatConfig.ChatWindow> windows;
+    private final List<CorrectChatConfig.ChatTab> tabs;
+    private int page;
+
+    ChatWindowsScreen(Screen parent, CorrectChatConfig config) {
+        super(Component.literal("Chatfenster"));
+        this.parent = parent;
+        this.config = config;
+        String serverKey = CorrectChatClient.workspace().currentServerKey();
+        this.windows = config.windowsFor(serverKey);
+        this.tabs = config.tabsFor(serverKey);
+    }
+
+    @Override protected void init() {
+        int rows = Math.max(1, (height - 72) / 24);
+        int pages = Math.max(1, (windows.size() + rows - 1) / rows);
+        page = Math.min(page, pages - 1);
+        int from = page * rows;
+        int to = Math.min(windows.size(), from + rows);
+        for (int i = from; i < to; i++) {
+            int index = i;
+            CorrectChatConfig.ChatWindow window = windows.get(i);
+            int y = 34 + (i - from) * 24;
+            addRenderableWidget(Button.builder(Component.literal((i + 1) + ". " + window.name + (window.visible ? "" : " (aus)")),
+                    button -> minecraft.gui.setScreen(new Editor(this, config, window, tabs)))
+                    .bounds(width / 2 - 150, y, 220, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Löschen").withStyle(ChatFormatting.RED), button -> {
+                windows.remove(index); rebuildWidgets();
+            }).bounds(width / 2 + 74, y, 76, 20).build());
+        }
+        int bottom = height - 28;
+        addRenderableWidget(Button.builder(Component.literal("+ Fenster").withStyle(ChatFormatting.GREEN), button -> {
+            CorrectChatConfig.ChatWindow window = new CorrectChatConfig.ChatWindow();
+            windows.add(window);
+            minecraft.gui.setScreen(new Editor(this, config, window, tabs));
+        }).bounds(width / 2 - 150, bottom, 92, 20).build());
+        Button previous = Button.builder(Component.literal("◀"), button -> { page = Math.max(0, page - 1); rebuildWidgets(); })
+                .bounds(width / 2 - 52, bottom, 34, 20).build();
+        previous.active = page > 0;
+        addRenderableWidget(previous);
+        Button indicator = Button.builder(Component.literal((page + 1) + "/" + pages), button -> { })
+                .bounds(width / 2 - 14, bottom, 48, 20).build();
+        indicator.active = false;
+        addRenderableWidget(indicator);
+        Button next = Button.builder(Component.literal("▶"), button -> { page = Math.min(pages - 1, page + 1); rebuildWidgets(); })
+                .bounds(width / 2 + 38, bottom, 34, 20).build();
+        next.active = page < pages - 1;
+        addRenderableWidget(next);
+        addRenderableWidget(Button.builder(Component.literal("Zurück"), button -> onClose())
+                .bounds(width / 2 + 78, bottom, 72, 20).build());
+    }
+
+    @Override public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
+        super.extractRenderState(graphics, mouseX, mouseY, delta);
+        graphics.centeredText(font, title, width / 2, 13, 0xFFFFFFFF);
+        graphics.centeredText(font, Component.literal("Fenster lassen sich im Chat auch direkt verschieben und skalieren."), width / 2, 24, 0xFFAAAAAA);
+        if (windows.isEmpty()) {
+            graphics.centeredText(font, Component.literal("Noch keine Zusatzfenster angelegt"), width / 2, height / 2 - 8, 0xFFE0E0E0);
+            graphics.centeredText(font, Component.literal("Der normale Minecraft-Chat bleibt weiterhin aktiv."), width / 2, height / 2 + 5, 0xFF999999);
+        }
+    }
+    @Override public void onClose() { minecraft.gui.setScreen(parent); }
+    @Override public boolean isPauseScreen() { return false; }
+
+    private static final class Editor extends Screen {
+        private final Screen parent;
+        private final CorrectChatConfig config;
+        private final CorrectChatConfig.ChatWindow window;
+        private final List<CorrectChatConfig.ChatTab> tabs;
+        private final List<Label> labels = new ArrayList<>();
+        private EditBox name, x, y, widthBox, heightBox;
+        private Button tabButton;
+        private int tabIndex;
+        private String error = "";
+
+        Editor(Screen parent, CorrectChatConfig config, CorrectChatConfig.ChatWindow window,
+               List<CorrectChatConfig.ChatTab> tabs) {
+            super(Component.literal("Chatfenster bearbeiten"));
+            this.parent = parent; this.config = config; this.window = window; this.tabs = tabs;
+        }
+        @Override protected void init() {
+            labels.clear();
+            tabIndex = Math.max(0, indexOfTab(window.activeTabId));
+            int xPos = width / 2 - 150, yPos = 34, w = 300;
+            name = field(xPos, yPos, w, "Name", window.name); yPos += 24;
+            toggle(xPos, yPos, w, "Sichtbar", window.visible); yPos += 24;
+            x = field(xPos, yPos, w, "X", Integer.toString(window.x)); yPos += 24;
+            y = field(xPos, yPos, w, "Y", Integer.toString(window.y)); yPos += 24;
+            widthBox = field(xPos, yPos, w, "Breite", Integer.toString(window.width)); yPos += 24;
+            heightBox = field(xPos, yPos, w, "Höhe", Integer.toString(window.height)); yPos += 24;
+            tabButton = addRenderableWidget(Button.builder(tabLabel(), button -> {
+                tabIndex = (tabIndex + 1) % tabs.size(); button.setMessage(tabLabel());
+            }).bounds(xPos, yPos, w, 20).build());
+            int bottom = height - 28;
+            addRenderableWidget(Button.builder(Component.literal("Übernehmen"), button -> save()).bounds(width / 2 - 104, bottom, 100, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Zurück"), button -> onClose()).bounds(width / 2 + 4, bottom, 100, 20).build());
+        }
+        @Override public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
+            super.extractRenderState(graphics, mouseX, mouseY, delta);
+            graphics.centeredText(font, title, width / 2, 14, 0xFFFFFFFF);
+            labels.forEach(label -> graphics.text(font, label.text, label.x, label.y + 6, 0xFFE0E0E0, true));
+            if (!error.isEmpty()) graphics.centeredText(font, Component.literal(error), width / 2, height - 41, 0xFFFF6060);
+        }
+        @Override public void onClose() { minecraft.gui.setScreen(parent); }
+        @Override public boolean isPauseScreen() { return false; }
+        private void save() {
+            try {
+                window.name = name.getValue(); window.x = number(x, "X"); window.y = number(y, "Y");
+                window.width = number(widthBox, "Breite"); window.height = number(heightBox, "Höhe");
+                window.activeTabId = tabs.get(tabIndex).id; window.normalize(); onClose();
+            } catch (IllegalArgumentException exception) { error = exception.getMessage(); }
+        }
+        private void toggle(int x, int y, int w, String label, boolean current) {
+            addRenderableWidget(Button.builder(CorrectChatConfigScreen.toggleLabel(label, current), button -> {
+                window.visible = !window.visible; button.setMessage(CorrectChatConfigScreen.toggleLabel(label, window.visible));
+            }).bounds(x, y, w, 20).build());
+        }
+        private EditBox field(int x, int y, int w, String label, String value) {
+            EditBox box = new EditBox(font, x + 90, y, w - 90, 20, Component.literal(label));
+            box.setMaxLength(128); box.setValue(value); addRenderableWidget(box);
+            labels.add(new Label(Component.literal(label), x, y)); return box;
+        }
+        private int indexOfTab(String id) {
+            for (int i = 0; i < tabs.size(); i++) if (tabs.get(i).id.equals(id)) return i;
+            return 0;
+        }
+        private Component tabLabel() { return Component.literal("Aktiver Tab: " + tabs.get(tabIndex).name); }
+        private static int number(EditBox box, String name) {
+            try { return Integer.parseInt(box.getValue().trim()); }
+            catch (NumberFormatException exception) { throw new IllegalArgumentException(name + " ist keine Ganzzahl"); }
+        }
+        private record Label(Component text, int x, int y) { }
+    }
+}

@@ -13,17 +13,12 @@ import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.gui.screens.ChatScreen;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.mojang.blaze3d.platform.InputConstants;
-
-import java.util.Collections;
-import java.util.Set;
-import java.util.WeakHashMap;
 
 public final class CorrectChatClient implements ClientModInitializer {
     public static final String MOD_ID = "correctchat";
@@ -33,8 +28,6 @@ public final class CorrectChatClient implements ClientModInitializer {
     private static ChatEngine engine;
     private static ChatWorkspace workspace;
     private static TwitchChatService twitch;
-    private static final Set<Screen> MOUSE_HOOKED_SCREENS =
-            Collections.newSetFromMap(new WeakHashMap<>());
 
     @Override
     public void onInitializeClient() {
@@ -60,8 +53,10 @@ public final class CorrectChatClient implements ClientModInitializer {
 
     private static void registerChatMouseEvents() {
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
-            if (!(screen instanceof ChatScreen) || !MOUSE_HOOKED_SCREENS.add(screen)) return;
+            if (!(screen instanceof ChatScreen)) return;
 
+            // Fabric recreates a screen's event containers on every init/resize. Register on every
+            // AFTER_INIT invocation as well; suppressing a repeated screen instance loses the hooks.
             ScreenMouseEvents.allowMouseDrag(screen).register((currentScreen, event, dragX, dragY) -> {
                 if (workspace == null) return true;
                 return !workspace.dragWindow(

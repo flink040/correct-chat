@@ -1,13 +1,35 @@
-plugins {
-    id 'net.fabricmc.fabric-loom' version "${loom_version}"
-    id 'maven-publish'
+buildscript {
+    repositories {
+        maven { url = 'https://maven.fabricmc.net/' }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+    dependencies {
+        classpath "net.fabricmc:fabric-loom:${project.loom_version}"
+    }
+}
+
+apply plugin: providers.gradleProperty('minecraft_target').get() == '1.21.11'
+        ? 'net.fabricmc.fabric-loom-remap'
+        : 'net.fabricmc.fabric-loom'
+apply plugin: 'maven-publish'
+
+def supportedTargets = [
+        '26.2': [minecraft: '26.2', fabricApi: '0.160.0+26.2', modMenu: '20.0.3', java: 25, legacy: false],
+        '26.1': [minecraft: '26.1.2', fabricApi: '0.155.3+26.1.2', modMenu: '18.0.1', java: 25, legacy: false],
+        '1.21.11': [minecraft: '1.21.11', fabricApi: '0.141.6+1.21.11', modMenu: '17.0.1', java: 21, legacy: true]
+]
+def targetName = providers.gradleProperty('minecraft_target').get()
+def target = supportedTargets[targetName]
+if (target == null) {
+    throw new GradleException("Unsupported Minecraft target '${targetName}'. Supported targets: ${supportedTargets.keySet().join(', ')}")
 }
 
 version = project.mod_version
 group = project.maven_group
 
 base {
-    archivesName = project.archives_base_name
+    archivesName = "${project.archives_base_name}-mc${targetName}"
 }
 
 loom {
@@ -26,10 +48,19 @@ repositories {
 }
 
 dependencies {
-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
-    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
-    implementation "com.terraformersmc:modmenu:${project.modmenu_version}"
+    minecraft "com.mojang:minecraft:${target.minecraft}"
+    if (target.legacy) {
+        mappings loom.officialMojangMappings()
+    }
+    if (target.legacy) {
+        modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+        modImplementation "net.fabricmc.fabric-api:fabric-api:${target.fabricApi}"
+        modImplementation "com.terraformersmc:modmenu:${target.modMenu}"
+    } else {
+        implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+        implementation "net.fabricmc.fabric-api:fabric-api:${target.fabricApi}"
+        implementation "com.terraformersmc:modmenu:${target.modMenu}"
+    }
     testImplementation "org.junit.jupiter:junit-jupiter:${project.junit_version}"
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     include implementation("com.googlecode.soundlibs:mp3spi:1.9.5.4")
@@ -37,6 +68,43 @@ dependencies {
     include implementation("com.googlecode.soundlibs:jlayer:1.0.1.4")
     include implementation("com.googlecode.soundlibs:jorbis:0.0.17.4")
     include implementation("com.googlecode.soundlibs:tritonus-share:0.3.7.4")
+}
+
+def generatedClientSources = layout.buildDirectory.dir('generated/sources/versionedClient/java')
+def prepareVersionedClientSources = tasks.register('prepareVersionedClientSources', Sync) {
+    inputs.property 'minecraft_target', targetName
+    from('src/client/java')
+    into(generatedClientSources)
+    filteringCharset = 'UTF-8'
+    filesMatching('**/*.java') {
+        filter { line ->
+            if (targetName == '26.2') return line
+            line = line
+                    .replace('.gui.hud.getChat()', '.gui.getChat()')
+                    .replace('client.gui == null || client.gui.hud == null', 'client.gui == null')
+                    .replace('.gui.setScreen(', '.setScreen(')
+                    .replace('.gui.screen()', '.screen')
+            if (!target.legacy) return line
+            line
+                    .replace('net.minecraft.client.gui.GuiGraphicsExtractor', 'net.minecraft.client.gui.GuiGraphics')
+                    .replace('GuiGraphicsExtractor', 'GuiGraphics')
+                    .replace('extractRenderState(', 'render(')
+                    .replace('super.extractRenderState(', 'super.render(')
+                    .replace('.centeredText(', '.drawCenteredString(')
+                    .replace('.text(', '.drawString(')
+                    .replace('org.joml.Matrix3x2fStack', 'com.mojang.blaze3d.vertex.PoseStack')
+                    .replace('Matrix3x2fStack', 'PoseStack')
+                    .replace('.pushMatrix()', '.pushPose()')
+                    .replace('.popMatrix()', '.popPose()')
+                    .replace('net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper', 'net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper')
+                    .replace('KeyMappingHelper', 'KeyBindingHelper')
+        }
+    }
+}
+
+sourceSets.client.java.setSrcDirs([generatedClientSources])
+tasks.named('compileClientJava') {
+    dependsOn prepareVersionedClientSources
 }
 
 sourceSets {
@@ -70,8 +138,11 @@ tasks.named('jar') {
 
 processResources {
     inputs.property 'version', project.version
+    inputs.property 'minecraft_dependency', targetName == '26.1' ? '~26.1' : "~${target.minecraft}"
+    inputs.property 'java_dependency', target.java
+    inputs.property 'fabric_api_dependency', target.fabricApi
     filesMatching('fabric.mod.json') {
-        expand version: inputs.properties.version
+        expand inputs.properties
     }
     from('THIRD_PARTY_NOTICE.md') {
         into 'META-INF'
@@ -79,17 +150,21 @@ processResources {
 }
 
 tasks.withType(JavaCompile).configureEach {
-    options.release = 25
+    options.release = target.java
 }
 
 java {
     withSourcesJar()
-    sourceCompatibility = JavaVersion.VERSION_25
-    targetCompatibility = JavaVersion.VERSION_25
+    sourceCompatibility = JavaVersion.toVersion(target.java)
+    targetCompatibility = JavaVersion.toVersion(target.java)
+}
+
+tasks.named('sourcesJar') {
+    dependsOn prepareVersionedClientSources
 }
 
 def releaseVersion = project.version.toString()
-def releaseArchiveBaseName = project.archives_base_name.toString()
+def releaseArchiveBaseName = "${project.archives_base_name}-mc${targetName}"
 
 tasks.register('verifyReleaseNotices') {
     dependsOn tasks.named('jar'), tasks.named('sourcesJar')
@@ -146,6 +221,12 @@ tasks.register('verifyReleaseNotices') {
                 throw new GradleException("Sources JAR must not contain ${forbidden}")
             }
         }
+    }
+}
+
+tasks.register('printTarget') {
+    doLast {
+        println "Correct Chat target ${targetName}: Minecraft ${target.minecraft}, Fabric API ${target.fabricApi}, Mod Menu ${target.modMenu}, Java ${target.java}"
     }
 }
 

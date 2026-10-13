@@ -18,9 +18,9 @@
   ],
   "depends": {
     "fabricloader": ">=0.19.5",
-    "minecraft": "~26.2",
-    "java": ">=25",
-    "fabric-api": ">=0.160.0+26.2"
+    "minecraft": "${minecraft_dependency}",
+    "java": ">=${java_dependency}",
+    "fabric-api": ">=${fabric_api_dependency}"
   },
   "suggests": {
     "modmenu": ">=20.0.0"

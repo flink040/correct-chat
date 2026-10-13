@@ -4,19 +4,19 @@ Correct Chat ist eine clientseitige Fabric-Mod für Minecraft, die den Chat übe
 
 ## Voraussetzungen
 
-- Minecraft Java Edition **26.2**
+- Minecraft Java Edition **26.2**, **26.1.2** oder **1.21.11**
 - Fabric Loader **0.19.5 oder neuer**
-- Fabric API **0.160.0+26.2 oder neuer**
-- Java **25**
-- optional: Mod Menu **20.x**
+- eine zur Minecraft-Version passende Fabric API
+- Java **25** für Minecraft 26.x oder Java **21** für Minecraft 1.21.11
+- optional: eine zur Minecraft-Version passende Mod-Menu-Version
 
 Correct Chat ist eine reine Client-Mod. Sie muss nicht auf dem Minecraft-Server installiert sein.
 
 ## Installation
 
-1. Installiere den Fabric Loader für Minecraft 26.2.
+1. Installiere den Fabric Loader für deine unterstützte Minecraft-Version.
 2. Lade die passende Fabric API herunter.
-3. Kopiere die Fabric API und `correct-chat-1.0.0.jar` in den Minecraft-Ordner `mods`.
+3. Kopiere die Fabric API und das passende Correct-Chat-JAR in den Minecraft-Ordner `mods`: `correct-chat-mc26.2-1.0.0.jar`, `correct-chat-mc26.1-1.0.0.jar` oder `correct-chat-mc1.21.11-1.0.0.jar`.
 4. Starte Minecraft mit dem Fabric-Profil.
 5. Öffne die Einstellungen mit `F8` oder über **Mod Menu → Correct Chat → Einstellungen**.
 
@@ -189,7 +189,7 @@ $env:JAVA_HOME='C:\Pfad\zum\jdk-25'
 .\gradlew.bat build
 ```
 
-Das fertige JAR liegt anschließend unter `build/libs/correct-chat-1.0.0.jar`.
+Das fertige JAR liegt anschließend – abhängig vom Build-Ziel – unter `build/libs/correct-chat-mc26.2-1.0.0.jar`, `build/libs/correct-chat-mc26.1-1.0.0.jar` oder `build/libs/correct-chat-mc1.21.11-1.0.0.jar`.
 
 ## Fehlerbehebung
 

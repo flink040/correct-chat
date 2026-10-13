@@ -16,7 +16,7 @@ apply plugin: 'maven-publish'
 
 def supportedTargets = [
         '26.2': [minecraft: '26.2', fabricApi: '0.160.0+26.2', modMenu: '20.0.3', java: 25, legacy: false],
-        '26.1': [minecraft: '26.1.2', fabricApi: '0.155.3+26.1.2', modMenu: '18.0.1', java: 25, legacy: false],
+        '26.1': [minecraft: '26.1', fabricApi: '0.145.1+26.1', modMenu: '18.0.1', java: 25, legacy: false],
         '1.21.11': [minecraft: '1.21.11', fabricApi: '0.141.6+1.21.11', modMenu: '17.0.1', java: 21, legacy: true]
 ]
 def targetName = providers.gradleProperty('minecraft_target').get()
@@ -88,21 +88,31 @@ def prepareVersionedClientSources = tasks.register('prepareVersionedClientSource
             line
                     .replace('net.minecraft.client.gui.GuiGraphicsExtractor', 'net.minecraft.client.gui.GuiGraphics')
                     .replace('GuiGraphicsExtractor', 'GuiGraphics')
+                    .replace('"extractRenderState"', '"render"')
                     .replace('extractRenderState(', 'render(')
                     .replace('super.extractRenderState(', 'super.render(')
-                    .replace('.centeredText(', '.drawCenteredString(')
-                    .replace('.text(', '.drawString(')
-                    .replace('org.joml.Matrix3x2fStack', 'com.mojang.blaze3d.vertex.PoseStack')
-                    .replace('Matrix3x2fStack', 'PoseStack')
-                    .replace('.pushMatrix()', '.pushPose()')
-                    .replace('.popMatrix()', '.popPose()')
+                    .replace('graphics.centeredText(', 'graphics.drawCenteredString(')
+                    .replace('graphics.text(', 'graphics.drawString(')
+                    .replace('g.centeredText(', 'g.drawCenteredString(')
+                    .replace('g.text(', 'g.drawString(')
+                    .replace('.horizontalLine(', '.hLine(')
+                    .replace('.verticalLine(', '.vLine(')
+                    .replace('net.fabricmc.fabric.api.client.command.v2.ClientCommands', 'net.fabricmc.fabric.api.client.command.v2.ClientCommandManager')
+                    .replace('ClientCommands.', 'ClientCommandManager.')
                     .replace('net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper', 'net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper')
                     .replace('KeyMappingHelper', 'KeyBindingHelper')
+                    .replace('registerKeyMapping(', 'registerKeyBinding(')
+                    .replace('net.minecraft.client.multiplayer.chat.GuiMessage', 'net.minecraft.client.GuiMessage')
+                    .replace('.addClientSystemMessage(', '.addMessage(')
+                    .replace('extractContents(', 'renderContents(')
         }
     }
 }
 
-sourceSets.client.java.setSrcDirs([generatedClientSources])
+sourceSets.client.java.setSrcDirs([
+        generatedClientSources,
+        target.legacy ? 'src/compatLegacy/java' : 'src/compat26_2/java'
+])
 tasks.named('compileClientJava') {
     dependsOn prepareVersionedClientSources
 }
@@ -141,6 +151,8 @@ processResources {
     inputs.property 'minecraft_dependency', targetName == '26.1' ? '~26.1' : "~${target.minecraft}"
     inputs.property 'java_dependency', target.java
     inputs.property 'fabric_api_dependency', target.fabricApi
+    inputs.property 'mixin_config', target.legacy ? 'correctchat.client.legacy.mixins.json' : 'correctchat.client.mixins.json'
+    inputs.property 'modmenu_dependency', ">=${target.modMenu.tokenize('.')[0]}.0.0"
     filesMatching('fabric.mod.json') {
         expand inputs.properties
     }

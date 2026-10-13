@@ -48,7 +48,7 @@ public final class CorrectChatClient implements ClientModInitializer {
                 client.gui.setScreen(new CorrectChatConfigScreen(client.gui.screen(), config.copy()));
             }
         });
-        LOGGER.info("Correct Chat initialized for Minecraft 26.2");
+        LOGGER.info("Correct Chat initialized");
     }
 
     public static CorrectChatConfig config() { return config; }

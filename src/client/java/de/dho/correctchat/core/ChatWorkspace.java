@@ -15,7 +15,6 @@ import net.minecraft.client.gui.components.ChatComponent;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.chat.GuiMessage;
-import net.minecraft.client.multiplayer.chat.GuiMessageSource;
 import net.minecraft.network.chat.Component;
 import net.minecraft.ChatFormatting;
 import net.minecraft.resources.Identifier;
@@ -141,7 +140,7 @@ public final class ChatWorkspace {
         if (client.gui == null || client.gui.hud == null) return;
         CorrectChatConfig config = CorrectChatClient.config();
         ChatComponent chat = client.gui.hud.getChat();
-        chat.setVisibleMessageFilter(message -> {
+        ChatFilterCompat.apply(chat, message -> {
             if (config == null || !config.enabled) return true;
             if (isBlockedAdvertisement(message.content())) return false;
             if (!config.chatTabsEnabled) return true;
@@ -315,7 +314,7 @@ public final class ChatWorkspace {
         int lineIndex = accessor.correctchat$getChatScrollbarPos() + visibleLine;
         List<GuiMessage.Line> lines = accessor.correctchat$getTrimmedMessages();
         if (visibleLine < 0 || visibleLine >= chat.getLinesPerPage() || lineIndex < 0 || lineIndex >= lines.size()) return null;
-        return lines.get(lineIndex).parent().content();
+        return ChatFilterCompat.componentAt(lines, lineIndex);
     }
 
     public boolean dragWindow(double mouseX, double mouseY, int screenWidth, int screenHeight) {
@@ -549,7 +548,7 @@ public final class ChatWorkspace {
     }
 
     private Kind kindOf(GuiMessage message) {
-        Kind fallback = message.source() == GuiMessageSource.PLAYER ? Kind.PLAYER : Kind.SYSTEM;
+        Kind fallback = ChatFilterCompat.fallbackKind(message);
         return history.kindOf(message.content(), fallback);
     }
 

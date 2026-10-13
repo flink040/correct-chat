@@ -9,6 +9,9 @@ import java.util.List;
 
 @Mixin(ChatComponent.class)
 public interface ChatComponentAccessor {
+    @Accessor("allMessages")
+    List<?> correctchat$getAllMessages();
+
     @Accessor("trimmedMessages")
     List<GuiMessage.Line> correctchat$getTrimmedMessages();
 

@@ -112,11 +112,6 @@ public final class ChatEngine {
                             .executes(context -> sendEncodedMessage(StringArgumentType.getString(context, "payload")))));
             dispatcher.register(ClientCommands.literal(INTERNAL_CANCEL_LINK)
                     .executes(context -> 1));
-            dispatcher.register(ClientCommands.literal("ignore")
-                    .executes(context -> showIgnoredPlayers())
-                    .then(ClientCommands.argument("spieler", StringArgumentType.word())
-                            .executes(context -> toggleIgnoredPlayer(
-                                    StringArgumentType.getString(context, "spieler")))));
             dispatcher.register(ClientCommands.literal("ignorelist")
                     .executes(context -> showIgnoredPlayers()));
             dispatcher.register(ClientCommands.literal("ignoreclear")
@@ -161,6 +156,18 @@ public final class ChatEngine {
     }
 
     private boolean allowOutgoingCommand(String command) {
+        // Keep /ignore out of the client dispatcher: forwarding it with sendCommand would
+        // re-enter Fabric's client-command handler and execute the same command recursively.
+        if (command.equals("ignore")) {
+            showIgnoredPlayers();
+            return false;
+        }
+        if (command.startsWith("ignore ")) {
+            String[] parts = command.trim().split("\\s+");
+            if (parts.length == 2 && PLAYER_NAME.matcher(parts[1]).matches()) {
+                toggleIgnoredPlayer(parts[1]);
+            }
+        }
         if (command.equals(INTERNAL_CANCEL_LINK)) {
             return false;
         }
@@ -279,8 +286,6 @@ public final class ChatEngine {
         else config.ignoredPlayers.remove(existing);
         CorrectChatClient.applyConfig(config);
 
-        Minecraft client = Minecraft.getInstance();
-        if (client.getConnection() != null) client.getConnection().sendCommand("ignore " + player);
         localMessage(ignored
                 ? "§a" + player + " wird jetzt vollständig ausgeblendet."
                 : "§e" + player + " wird nicht mehr ausgeblendet.");

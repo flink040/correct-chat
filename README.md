@@ -11,7 +11,7 @@ Clientseitige Fabric-Portierung der Funktionen aus vier LabyMod-4-Addons:
 
 ## Zielplattform
 
-- Minecraft Java Edition 26.2, 26.1.2 oder 1.21.11
+- Minecraft Java Edition 26.2, 26.1 oder 1.21.11
 - Fabric Loader 0.19.5+
 - Fabric API passend zur Minecraft-Version
 - Java 25 für Minecraft 26.x, Java 21 für Minecraft 1.21.11
@@ -69,10 +69,10 @@ Unter „Twitch“ kann ein Kanal eingetragen und die Verbindung aktiviert werde
 
 ```powershell
 $env:JAVA_HOME='C:\path\to\jdk-25'
-.\gradlew.bat build
+.\build-all.ps1
 ```
 
-Der Build führt auch die automatisierten Tests und die Prüfung des Release-JARs aus. Nur die Tests lassen sich mit `./gradlew test` starten. Je nach Zielversion entsteht eines der folgenden Mod-JARs:
+Das Skript baut und prüft alle drei Zielversionen. Ein einzelnes Ziel lässt sich zum Beispiel mit `.\gradlew.bat build -Pminecraft_target=26.1` bauen. Nur die Tests lassen sich mit `./gradlew test` starten. Es entstehen folgende Mod-JARs:
 
 - `build/libs/correct-chat-mc26.2-1.0.0.jar`
 - `build/libs/correct-chat-mc26.1-1.0.0.jar`
@@ -85,7 +85,7 @@ Der Build führt auch die automatisierten Tests und die Prüfung des Release-JAR
 - `reverse-engineered/<addon>/` – mit Vineflower dekompilierte Referenzquellen und Originalressourcen
 - `REVERSE_ENGINEERING.md` – Befunde, Verhaltensmatrix und Portierungsentscheidungen
 
-`reverse-engineered/` ist ausschließlich ein lokaler Analyseordner, wird von Git ignoriert und darf nicht veröffentlicht werden. Die genaue Veröffentlichungsgrenze ist in `THIRD_PARTY_NOTICE.md` dokumentiert. GitHub Actions baut das Projekt bei Pushes und Pull Requests automatisch mit Java 25.
+`reverse-engineered/` ist ausschließlich ein lokaler Analyseordner, wird von Git ignoriert und darf nicht veröffentlicht werden. Die genaue Veröffentlichungsgrenze ist in `THIRD_PARTY_NOTICE.md` dokumentiert. GitHub Actions baut für Releases automatisch alle drei Zielversionen mit Java 25.
 
 ## Herkunft und Veröffentlichung
 

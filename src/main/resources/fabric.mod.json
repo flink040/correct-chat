@@ -14,7 +14,7 @@
     "modmenu": ["de.dho.correctchat.compat.CorrectChatModMenu"]
   },
   "mixins": [
-    "correctchat.client.mixins.json"
+    "${mixin_config}"
   ],
   "depends": {
     "fabricloader": ">=0.19.5",
@@ -23,6 +23,6 @@
     "fabric-api": ">=${fabric_api_dependency}"
   },
   "suggests": {
-    "modmenu": ">=20.0.0"
+    "modmenu": "${modmenu_dependency}"
   }
 }

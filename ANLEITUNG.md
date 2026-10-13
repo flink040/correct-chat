@@ -4,7 +4,7 @@ Correct Chat ist eine clientseitige Fabric-Mod für Minecraft, die den Chat übe
 
 ## Voraussetzungen
 
-- Minecraft Java Edition **26.2**, **26.1.2** oder **1.21.11**
+- Minecraft Java Edition **26.2**, **26.1** oder **1.21.11**
 - Fabric Loader **0.19.5 oder neuer**
 - eine zur Minecraft-Version passende Fabric API
 - Java **25** für Minecraft 26.x oder Java **21** für Minecraft 1.21.11

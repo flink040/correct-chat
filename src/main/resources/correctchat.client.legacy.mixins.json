@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "de.dho.correctchat.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ChatComponentAccessor",
+    "ChatComponentLegacyMixin",
+    "ChatScreenMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

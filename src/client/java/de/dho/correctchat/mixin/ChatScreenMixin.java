@@ -30,7 +30,7 @@ public abstract class ChatScreenMixin extends Screen {
 
     @Inject(method = "init", at = @At("TAIL"))
     private void correctchat$addTabButtons(CallbackInfo callback) {
-        if (CorrectChatClient.workspace() != null) {
+        if (correctchat$isWorkspaceEnabled() && CorrectChatClient.workspace() != null) {
             input.setWidth(CorrectChatClient.workspace().primaryChatWidth(width));
             CorrectChatClient.workspace().addTabButtons(this::addRenderableWidget, this::rebuildWidgets, width, height);
         }
@@ -45,14 +45,16 @@ public abstract class ChatScreenMixin extends Screen {
                 || !CorrectChatClient.config().chatMessagePreview) return;
 
         String message = input.getValue();
-        if (message.isEmpty() || message.startsWith("/") || !LegacyText.hasFormattingCode(message)) return;
+        if (message.isEmpty() || message.startsWith("/")) return;
+        String defaultColor = CorrectChatClient.config().defaultChatColor.code;
+        if (defaultColor.isEmpty() && !LegacyText.hasFormattingCode(message)) return;
 
         int x = input.getX();
         int y = input.getY() - 13;
         int right = x + input.getWidth();
         graphics.fill(x, y, right, input.getY() - 1, 0xB0000000);
         graphics.enableScissor(x + 2, y, right - 2, input.getY() - 1);
-        graphics.text(font, LegacyText.parse(message), x + 3, y + 2, 0xFFFFFFFF, false);
+        graphics.text(font, LegacyText.parse(defaultColor + message), x + 3, y + 2, 0xFFFFFFFF, false);
         graphics.disableScissor();
     }
 
@@ -66,6 +68,7 @@ public abstract class ChatScreenMixin extends Screen {
     )
     private void correctchat$keepArrowKeysInChatHistory(KeyEvent event,
                                                          CallbackInfoReturnable<Boolean> callback) {
+        if (!correctchat$isEnabled()) return;
         if (event.key() == GLFW_KEY_UP) {
             ((ChatScreen)(Object)this).moveInHistory(-1);
             callback.setReturnValue(true);
@@ -78,6 +81,7 @@ public abstract class ChatScreenMixin extends Screen {
     @Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
     private void correctchat$beginWindowDrag(MouseButtonEvent event, boolean doubleClick,
                                              CallbackInfoReturnable<Boolean> callback) {
+        if (!correctchat$isEnabled()) return;
         if (CorrectChatClient.workspace() != null
                 && CorrectChatClient.workspace().handleTabRowClick(event.x(), event.y(), event.button(), this)) {
             callback.setReturnValue(true);
@@ -95,6 +99,38 @@ public abstract class ChatScreenMixin extends Screen {
                 && CorrectChatClient.workspace().beginWindowDrag(event.x(), event.y(), event.button(), width, height)) {
             callback.setReturnValue(true);
         }
+    }
+
+    /**
+     * Keep an active window resize inside ChatScreen's own input path. Fabric's per-screen mouse
+     * events are recreated during widget rebuilds, which made an already-started resize lose its
+     * drag/release callbacks. Adding the overrides to ChatScreen makes the gesture independent of
+     * that event-container lifecycle.
+     */
+    @Override
+    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        if (correctchat$isEnabled() && CorrectChatClient.workspace() != null
+                && CorrectChatClient.workspace().dragWindow(event.x(), event.y(), width, height)) {
+            return true;
+        }
+        return super.mouseDragged(event, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(MouseButtonEvent event) {
+        if (correctchat$isEnabled() && CorrectChatClient.workspace() != null
+                && CorrectChatClient.workspace().endWindowDrag()) {
+            return true;
+        }
+        return super.mouseReleased(event);
+    }
+
+    private static boolean correctchat$isEnabled() {
+        return CorrectChatClient.config() != null && CorrectChatClient.config().enabled;
+    }
+
+    private static boolean correctchat$isWorkspaceEnabled() {
+        return correctchat$isEnabled() && CorrectChatClient.config().chatTabsEnabled;
     }
 
 }

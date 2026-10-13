@@ -179,25 +179,30 @@ public final class TwitchChatService {
     }
 
     private void chatMessage(String username, String message) {
-        MutableComponent component = Component.literal("[Twitch] ").withStyle(ChatFormatting.DARK_PURPLE)
+        MutableComponent component = Localizer.literal("[Twitch] ").withStyle(ChatFormatting.DARK_PURPLE)
                 .append(Component.literal(username).withStyle(ChatFormatting.LIGHT_PURPLE))
-                .append(Component.literal(": ").withStyle(ChatFormatting.DARK_GRAY))
+                .append(Localizer.literal(": ").withStyle(ChatFormatting.DARK_GRAY))
                 .append(Component.literal(message).withStyle(ChatFormatting.WHITE));
-        emit(component);
+        emit(component, true);
     }
 
     private void statusMessage(String message, ChatFormatting color) {
-        MutableComponent component = Component.literal("[Twitch] ").withStyle(ChatFormatting.DARK_PURPLE)
+        MutableComponent component = Localizer.literal("[Twitch] ").withStyle(ChatFormatting.DARK_PURPLE)
                 .append(Component.literal(message).withStyle(color));
-        emit(component);
+        emit(component, false);
     }
 
-    private void emit(Component component) {
+    private void emit(Component component, boolean processMessage) {
         Minecraft client = Minecraft.getInstance();
         client.execute(() -> {
             if (client.gui == null || client.gui.hud == null || CorrectChatClient.workspace() == null) return;
-            CorrectChatClient.workspace().record(component, ChatWorkspace.Kind.TWITCH);
-            client.gui.hud.getChat().addClientSystemMessage(component);
+            if (processMessage && CorrectChatClient.engine() != null) {
+                Component processed = CorrectChatClient.engine().processTwitch(component);
+                if (processed != null) client.gui.hud.getChat().addClientSystemMessage(processed);
+            } else {
+                CorrectChatClient.workspace().record(component, ChatWorkspace.Kind.TWITCH);
+                client.gui.hud.getChat().addClientSystemMessage(component);
+            }
         });
     }
 

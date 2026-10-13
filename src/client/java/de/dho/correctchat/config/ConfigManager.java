@@ -23,6 +23,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 public final class ConfigManager {
+    private static final long MAX_IMPORT_BYTES = 10L * 1024L * 1024L;
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
     private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("correct-chat.json");
     private static final Path BACKUP_PATH = PATH.resolveSibling(PATH.getFileName() + ".bak");
@@ -91,6 +92,20 @@ public final class ConfigManager {
         }
     }
 
+    public static void reset(CorrectChatConfig defaults) throws IOException {
+        defaults.normalize();
+        CorrectChatConfig snapshot = defaults.copy();
+        synchronized (ConfigManager.class) {
+            ++saveRevision;
+            if (pendingSave != null) pendingSave.cancel(false);
+            pendingSave = null;
+        }
+        synchronized (WRITE_LOCK) {
+            writeAtomic(snapshot, false);
+            Files.deleteIfExists(BACKUP_PATH);
+        }
+    }
+
     private static void persist(CorrectChatConfig config, Logger logger, long revision) {
         try {
             synchronized (WRITE_LOCK) {
@@ -106,6 +121,49 @@ public final class ConfigManager {
 
     public static Path path() {
         return PATH;
+    }
+
+    public static CorrectChatConfig importFrom(Path source) throws IOException {
+        Path normalized = source.toAbsolutePath().normalize();
+        if (!Files.isRegularFile(normalized)) throw new IOException("Die ausgewählte Datei existiert nicht");
+        if (Files.size(normalized) > MAX_IMPORT_BYTES) throw new IOException("Die Settingsdatei ist größer als 10 MB");
+        CorrectChatConfig imported = readConfig(normalized);
+        if (imported.configVersion > CorrectChatConfig.CURRENT_VERSION) {
+            throw new IOException("Die Settingsdatei stammt aus einer neueren Correct-Chat-Version");
+        }
+        return imported;
+    }
+
+    public static void exportTo(CorrectChatConfig config, Path destination) throws IOException {
+        exportTo(config, destination, false);
+    }
+
+    public static void exportTo(CorrectChatConfig config, Path destination, boolean includeCredentials) throws IOException {
+        Path normalized = destination.toAbsolutePath().normalize();
+        if (normalized.equals(PATH.toAbsolutePath().normalize())) {
+            throw new IOException("Die aktive Konfigurationsdatei kann nicht als Exportziel verwendet werden");
+        }
+        Path directory = normalized.getParent();
+        if (directory == null) throw new IOException("Ungültiger Speicherort");
+        Files.createDirectories(directory);
+
+        CorrectChatConfig snapshot = config.copy();
+        snapshot.normalize();
+        if (!includeCredentials) snapshot.twitchOauthToken = "";
+        String serialized = GSON.toJson(snapshot);
+        CorrectChatConfig verification = GSON.fromJson(serialized, CorrectChatConfig.class);
+        if (verification == null) throw new IOException("Exportierte Settings konnten nicht validiert werden");
+        verification.normalize();
+
+        Path temporary = Files.createTempFile(directory, "correct-chat-export-", ".tmp");
+        try {
+            Files.writeString(temporary, serialized, StandardCharsets.UTF_8,
+                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+            forceFile(temporary);
+            moveReplacing(temporary, normalized);
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
     }
 
     private static CorrectChatConfig readConfig(Path source) throws IOException {

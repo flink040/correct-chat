@@ -1,5 +1,7 @@
 package de.dho.correctchat.gui;
 
+import de.dho.correctchat.core.Localizer;
+
 import de.dho.correctchat.CorrectChatClient;
 import de.dho.correctchat.config.CorrectChatConfig;
 import de.dho.correctchat.core.MessageRuleSuggestion;
@@ -9,6 +11,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,50 +30,44 @@ final class MessageTabRuleScreen extends Screen {
     private final List<CorrectChatConfig.ChatTab> targets = new ArrayList<>();
     private Proposal proposal;
     private int targetIndex;
-    private EditBox tabName;
     private EditBox rule;
-    private String tabNameValue;
     private String ruleValue;
     private String error = "";
 
     MessageTabRuleScreen(Screen parent, Screen chatScreen, MessageRuleSuggestion suggestion, Proposal proposal) {
-        super(Component.literal("Tab-Regel prüfen"));
+        super(Localizer.literal("Tab-Regel prüfen"));
         this.parent = parent;
         this.chatScreen = chatScreen;
         this.suggestion = suggestion;
         this.proposal = proposal;
         this.draft = CorrectChatClient.config().copy();
         this.serverKey = CorrectChatClient.workspace().currentServerKey();
-        this.tabNameValue = suggestion.suggestedTabName();
         this.ruleValue = proposedRule();
         refreshTargets();
     }
 
     @Override protected void init() {
-        int x = width / 2 - 180;
-        int w = 360;
+        int w = Math.min(360, width - 24);
+        int x = (width - w) / 2;
         int y = 52;
-        tabName = new EditBox(font, x + 104, y, w - 104, 20, Component.literal("Tabname"));
-        tabName.setMaxLength(64); tabName.setValue(tabNameValue); tabName.active = targetIndex == 0;
-        addRenderableWidget(tabName); y += 25;
-        addRenderableWidget(Button.builder(Component.literal("Vorschlag: " + proposalName()), button -> {
+        addRenderableWidget(Button.builder(Localizer.literal("Vorschlag: " + proposalName()), button -> {
             storeFields();
             proposal = Proposal.values()[(proposal.ordinal() + 1) % Proposal.values().length];
             ruleValue = proposedRule();
             rebuildWidgets();
         }).bounds(x, y, w, 20).build()); y += 25;
-        rule = new EditBox(font, x, y, w, 20, Component.literal("Regulärer Ausdruck"));
+        rule = new EditBox(font, x, y, w, 20, Localizer.literal("Regulärer Ausdruck"));
         rule.setMaxLength(1024); rule.setValue(ruleValue); addRenderableWidget(rule); y += 25;
-        addRenderableWidget(Button.builder(Component.literal("Ziel: " + targetName()), button -> {
+        addRenderableWidget(Button.builder(Localizer.literal("Ziel: " + targetName()), button -> {
             storeFields();
             targetIndex = (targetIndex + 1) % (targets.size() + 1);
             rebuildWidgets();
         }).bounds(x, y, w, 20).build());
 
         int bottom = height - 28;
-        addRenderableWidget(Button.builder(Component.literal("Regel übernehmen").withStyle(ChatFormatting.GREEN), button -> apply())
+        addRenderableWidget(Button.builder(Localizer.literal("Regel übernehmen").withStyle(ChatFormatting.GREEN), button -> apply())
                 .bounds(width / 2 - 104, bottom, 100, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Abbrechen"), button -> onClose())
+        addRenderableWidget(Button.builder(Localizer.literal("Abbrechen"), button -> onClose())
                 .bounds(width / 2 + 4, bottom, 100, 20).build());
     }
 
@@ -81,7 +78,7 @@ final class MessageTabRuleScreen extends Screen {
             if (ruleValue.isBlank()) throw new IllegalArgumentException("Die Regel darf nicht leer sein");
             if (targetIndex == 0) {
                 CorrectChatConfig.ChatTab tab = new CorrectChatConfig.ChatTab();
-                tab.name = tabNameValue.isBlank() ? suggestion.suggestedTabName() : tabNameValue;
+                tab.name = suggestion.suggestedTabName();
                 tab.filters.add(new CorrectChatConfig.TabFilter(CorrectChatConfig.TabType.REGEX, ruleValue));
                 draft.tabsFor(serverKey).add(tab);
                 draft.setPrimaryTabFor(serverKey, tab.id);
@@ -94,7 +91,7 @@ final class MessageTabRuleScreen extends Screen {
             }
             CorrectChatClient.applyConfig(draft);
             minecraft.gui.hud.getChat().addClientSystemMessage(
-                    Component.literal("Tab-Regel gespeichert: " + targetName()).withStyle(ChatFormatting.GREEN));
+                    Localizer.literal("Tab-Regel gespeichert: " + targetName()).withStyle(ChatFormatting.GREEN));
             minecraft.gui.setScreen(chatScreen);
         } catch (PatternSyntaxException exception) {
             error = "Ungültiger regulärer Ausdruck: " + exception.getDescription();
@@ -104,7 +101,6 @@ final class MessageTabRuleScreen extends Screen {
     }
 
     private void storeFields() {
-        if (tabName != null) tabNameValue = tabName.getValue().trim();
         if (rule != null) ruleValue = rule.getValue().trim();
     }
 
@@ -134,13 +130,20 @@ final class MessageTabRuleScreen extends Screen {
 
     @Override public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
         super.extractRenderState(graphics, mouseX, mouseY, delta);
-        int x = width / 2 - 180;
+        int contentWidth = Math.min(360, width - 24);
+        int x = (width - contentWidth) / 2;
         graphics.centeredText(font, title, width / 2, 12, 0xFFFFFFFF);
-        graphics.centeredText(font, Component.literal("Die vorgeschlagene Regex kann vor dem Speichern bearbeitet werden."),
+        graphics.centeredText(font, Localizer.literal("Die vorgeschlagene Regex kann vor dem Speichern bearbeitet werden."),
                 width / 2, 25, 0xFF9DA6A1);
-        graphics.text(font, Component.literal("Tabname"), x, 58, 0xFFE0E0E0, true);
-        graphics.text(font, Component.literal("Regel testet: " + suggestion.message()), x, 154, 0xFFAAAAAA, false);
-        if (!error.isEmpty()) graphics.centeredText(font, Component.literal(error), width / 2, height - 42, 0xFFFF6060);
+        List<FormattedCharSequence> explanation = font.split(
+                Localizer.literal(RegexExplainer.explain(rule == null ? ruleValue : rule.getValue())), contentWidth);
+        int explanationY = 130;
+        for (int i = 0; i < Math.min(2, explanation.size()); i++) {
+            graphics.centeredText(font, explanation.get(i), width / 2, explanationY, 0xFF71C9A3);
+            explanationY += font.lineHeight + 1;
+        }
+        graphics.text(font, Localizer.literal("Regel testet: " + suggestion.message()), x, 154, 0xFFAAAAAA, false);
+        if (!error.isEmpty()) graphics.centeredText(font, Localizer.literal(error), width / 2, height - 42, 0xFFFF6060);
     }
 
     @Override public void onClose() { minecraft.gui.setScreen(parent); }

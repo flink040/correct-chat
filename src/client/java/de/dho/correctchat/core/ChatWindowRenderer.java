@@ -17,6 +17,11 @@ final class ChatWindowRenderer {
         boolean matches(CorrectChatConfig.ChatTab tab, Component component, ChatWorkspace.Kind kind);
     }
 
+    @FunctionalInterface
+    interface LineWrapper {
+        List<FormattedCharSequence> split(Component component, int width);
+    }
+
     private ChatWindowRenderer() {
     }
 
@@ -27,10 +32,11 @@ final class ChatWindowRenderer {
                        IntUnaryOperator primaryWidth,
                        IntUnaryOperator primaryTop,
                        Function<String, CorrectChatConfig.ChatTab> findTab,
-                       MessageMatcher matcher) {
+                       MessageMatcher matcher,
+                       LineWrapper lineWrapper) {
         if (focused) renderPrimaryResizeHandle(graphics, primaryWidth, primaryTop);
         for (CorrectChatConfig.ChatWindow window : windows) {
-            if (window.visible) renderWindow(graphics, font, window, entries, focused, findTab, matcher);
+            if (window.visible) renderWindow(graphics, font, window, entries, focused, findTab, matcher, lineWrapper);
         }
     }
 
@@ -60,7 +66,8 @@ final class ChatWindowRenderer {
                                      List<ChatHistoryStore.Entry> entries,
                                      boolean focused,
                                      Function<String, CorrectChatConfig.ChatTab> findTab,
-                                     MessageMatcher matcher) {
+                                     MessageMatcher matcher,
+                                     LineWrapper lineWrapper) {
         int x = resolvedX(window, graphics.guiWidth());
         int y = resolvedY(window, graphics.guiHeight());
         int width = Math.min(window.width, graphics.guiWidth() - x);
@@ -85,7 +92,7 @@ final class ChatWindowRenderer {
             ChatHistoryStore.Entry entry = entries.get(i);
             if (!focused && entry.receivedAt < visibleSince) continue;
             if (!matcher.matches(active, entry.component, entry.kind)) continue;
-            List<FormattedCharSequence> lines = font.split(entry.component, Math.max(20, width - 8));
+            List<FormattedCharSequence> lines = lineWrapper.split(entry.component, Math.max(20, width - 8));
             for (int line = lines.size() - 1; line >= 0; line--) {
                 if (lineY < contentTop) break outer;
                 graphics.text(font, lines.get(line), x + 4, lineY, 0xFFFFFFFF, true);

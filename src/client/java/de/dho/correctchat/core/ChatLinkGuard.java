@@ -38,18 +38,18 @@ final class ChatLinkGuard {
         Minecraft client = Minecraft.getInstance();
         String encoded = Base64.getUrlEncoder().withoutPadding()
                 .encodeToString(message.getBytes(StandardCharsets.UTF_8));
-        MutableComponent yes = Component.literal("[Ja]").withStyle(style -> style
+        MutableComponent yes = Localizer.literal("[Ja]").withStyle(style -> style
                 .withColor(ChatFormatting.GREEN)
                 .withClickEvent(new ClickEvent.RunCommand("/" + ChatEngine.INTERNAL_SEND + encoded))
-                .withHoverEvent(new HoverEvent.ShowText(Component.literal("Nachricht einmalig mit Link senden"))));
-        MutableComponent no = Component.literal("[Nein]").withStyle(style -> style
+                .withHoverEvent(new HoverEvent.ShowText(Localizer.literal("Nachricht einmalig mit Link senden"))));
+        MutableComponent no = Localizer.literal("[Nein]").withStyle(style -> style
                 .withColor(ChatFormatting.RED)
                 .withClickEvent(new ClickEvent.RunCommand("/" + ChatEngine.INTERNAL_CANCEL_LINK))
-                .withHoverEvent(new HoverEvent.ShowText(Component.literal("Nachricht nicht senden"))));
+                .withHoverEvent(new HoverEvent.ShowText(Localizer.literal("Nachricht nicht senden"))));
         String summary = blockedLinks.getFirst()
                 + (blockedLinks.size() > 1 ? " (+" + (blockedLinks.size() - 1) + ")" : "");
-        client.gui.hud.getChat().addClientSystemMessage(Component.literal("§e⚠ Link: §f" + summary + "  ")
-                .append(yes).append(Component.literal(" ")).append(no));
+        client.gui.hud.getChat().addClientSystemMessage(Localizer.literal("§e⚠ Link: §f" + summary + "  ")
+                .append(yes).append(Localizer.literal(" ")).append(no));
     }
 
     private static boolean isExcepted(String url, List<String> exceptions) {

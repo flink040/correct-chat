@@ -41,11 +41,16 @@ public final class ChatLogService {
     });
 
     public synchronized void add(String text) {
-        CorrectChatConfig config = CorrectChatClient.config();
-        if (!config.enabled || !config.chatLog) return;
         Minecraft client = Minecraft.getInstance();
         String server = client.hasSingleplayerServer() ? "singleplayer"
                 : client.getCurrentServer() == null ? "" : client.getCurrentServer().ip;
+        add(text, server);
+    }
+
+    public synchronized void add(String text, String source) {
+        CorrectChatConfig config = CorrectChatClient.config();
+        if (!config.enabled || !config.chatLog) return;
+        String server = source == null ? "" : source;
         entries.addLast(new Entry(text, server, System.currentTimeMillis()));
         while (entries.size() > config.maxStoredMessages) entries.removeFirst();
     }
@@ -56,7 +61,7 @@ public final class ChatLogService {
     public void exportOrUpload(Integer requestedAmount) {
         List<Entry> snapshot = snapshot(requestedAmount);
         if (snapshot.isEmpty()) {
-            message(Component.literal("§eCorrect Chat: Keine Chatnachrichten gespeichert."));
+            message(Localizer.literal("§eCorrect Chat: Keine Chatnachrichten gespeichert."));
             return;
         }
         CorrectChatConfig config = CorrectChatClient.config();
@@ -86,12 +91,12 @@ public final class ChatLogService {
             } catch (IOException exception) {
                 CorrectChatClient.LOGGER.warn("Unable to prune old chat logs", exception);
             }
-            Component path = Component.literal(destination.toAbsolutePath().toString())
+            Component path = Localizer.literal(destination.toAbsolutePath().toString())
                     .withStyle(style -> style.withUnderlined(true).withClickEvent(new ClickEvent.OpenFile(destination.toAbsolutePath().toString())));
-            message(Component.literal("§aChatlog gespeichert: ").append(path));
+            message(Localizer.literal("§aChatlog gespeichert: ").append(path));
         } catch (IOException exception) {
             CorrectChatClient.LOGGER.error("Unable to export chat log", exception);
-            message(Component.literal("§cChatlog konnte nicht gespeichert werden."));
+            message(Localizer.literal("§cChatlog konnte nicht gespeichert werden."));
         }
     }
 
@@ -131,7 +136,12 @@ public final class ChatLogService {
 
     private void upload(List<Entry> snapshot, String endpoint) {
         try {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
+            URI destination = URI.create(endpoint);
+            if (!"https".equalsIgnoreCase(destination.getScheme())) {
+                message(Localizer.literal("§cChatlog-Upload abgebrochen: Die Upload-URL muss HTTPS verwenden."));
+                return;
+            }
+            HttpRequest request = HttpRequest.newBuilder(destination)
                     .header("Content-Type", "application/json; charset=utf-8")
                     .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(snapshot), StandardCharsets.UTF_8))
                     .build();
@@ -139,18 +149,18 @@ public final class ChatLogService {
             if (response.statusCode() == 200) {
                 String id = response.headers().firstValue("chatLogId").orElse("");
                 String url = "https://chatlog.hdskins.de/?id=" + id;
-                Component link = Component.literal(url).withStyle(style -> style.withUnderlined(true)
+                Component link = Localizer.literal(url).withStyle(style -> style.withUnderlined(true)
                         .withClickEvent(new ClickEvent.OpenUrl(URI.create(url))));
                 clear();
-                message(Component.literal("§aChatlog hochgeladen: ").append(link));
+                message(Localizer.literal("§aChatlog hochgeladen: ").append(link));
             } else if (response.statusCode() == 429) {
-                message(Component.literal("§cZu viele Uploads. Bitte später erneut versuchen."));
+                message(Localizer.literal("§cZu viele Uploads. Bitte später erneut versuchen."));
             } else {
-                message(Component.literal("§cChatlog-Upload fehlgeschlagen (HTTP " + response.statusCode() + ")."));
+                message(Localizer.literal("§cChatlog-Upload fehlgeschlagen (HTTP " + response.statusCode() + ")."));
             }
         } catch (Exception exception) {
             CorrectChatClient.LOGGER.error("Unable to upload chat log", exception);
-            message(Component.literal("§cChatlog-Upload fehlgeschlagen."));
+            message(Localizer.literal("§cChatlog-Upload fehlgeschlagen."));
         }
     }
 

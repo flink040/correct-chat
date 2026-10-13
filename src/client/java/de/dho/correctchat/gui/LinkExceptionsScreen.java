@@ -1,5 +1,7 @@
 package de.dho.correctchat.gui;
 
+import de.dho.correctchat.core.Localizer;
+
 import de.dho.correctchat.config.CorrectChatConfig;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -18,7 +20,7 @@ final class LinkExceptionsScreen extends Screen {
     private int page;
 
     LinkExceptionsScreen(Screen parent, CorrectChatConfig config) {
-        super(Component.literal("Erlaubte URLs"));
+        super(Localizer.literal("Erlaubte URLs"));
         this.parent = parent;
         this.config = config;
     }
@@ -38,12 +40,12 @@ final class LinkExceptionsScreen extends Screen {
             int index = i;
             int y = 40 + (i - from) * 24;
             EditBox field = new EditBox(font, x + 25, y, contentWidth - 105, 20,
-                    Component.literal("Erlaubte URL " + (i + 1)));
+                    Localizer.literal("Erlaubte URL " + (i + 1)));
             field.setMaxLength(512);
             field.setValue(config.linkExceptions.get(i));
             addRenderableWidget(field);
             visibleRows.add(new Row(i, field));
-            addRenderableWidget(Button.builder(Component.literal("Löschen").withStyle(ChatFormatting.RED), button -> {
+            addRenderableWidget(Button.builder(Localizer.literal("Löschen").withStyle(ChatFormatting.RED), button -> {
                 storeVisibleRows();
                 config.linkExceptions.remove(index);
                 rebuildWidgets();
@@ -51,36 +53,39 @@ final class LinkExceptionsScreen extends Screen {
         }
 
         int bottom = height - 28;
-        addRenderableWidget(Button.builder(Component.literal("+ Weitere URL zulassen").withStyle(ChatFormatting.GREEN), button -> {
+        int addWidth = Math.min(100, Math.max(72, contentWidth - 196));
+        addRenderableWidget(Button.builder(Localizer.literal("+ URL").withStyle(ChatFormatting.GREEN), button -> {
             storeVisibleRows();
             config.linkExceptions.add("");
             page = (config.linkExceptions.size() - 1) / rows;
             rebuildWidgets();
-        }).bounds(x, bottom, 150, 20).build());
+        }).bounds(x, bottom, addWidth, 20).build());
 
-        Button previous = Button.builder(Component.literal("◀"), button -> {
+        int pagerX = x + addWidth + 4;
+
+        Button previous = Button.builder(Localizer.literal("◀"), button -> {
             storeVisibleRows();
             page--;
             rebuildWidgets();
-        }).bounds(x + 156, bottom, 32, 20).build();
+        }).bounds(pagerX, bottom, 28, 20).build();
         previous.active = page > 0;
         addRenderableWidget(previous);
 
-        Button indicator = Button.builder(Component.literal((page + 1) + "/" + pages), button -> { })
-                .bounds(x + 192, bottom, 44, 20).build();
+        Button indicator = Button.builder(Localizer.literal((page + 1) + "/" + pages), button -> { })
+                .bounds(pagerX + 32, bottom, 40, 20).build();
         indicator.active = false;
         addRenderableWidget(indicator);
 
-        Button next = Button.builder(Component.literal("▶"), button -> {
+        Button next = Button.builder(Localizer.literal("▶"), button -> {
             storeVisibleRows();
             page++;
             rebuildWidgets();
-        }).bounds(x + 240, bottom, 32, 20).build();
+        }).bounds(pagerX + 76, bottom, 28, 20).build();
         next.active = page < pages - 1;
         addRenderableWidget(next);
 
-        addRenderableWidget(Button.builder(Component.literal("Zurück"), button -> onClose())
-                .bounds(x + 280, bottom, 80, 20).build());
+        addRenderableWidget(Button.builder(Localizer.literal("Zurück"), button -> onClose())
+                .bounds(x + contentWidth - 72, bottom, 72, 20).build());
     }
 
     @Override
@@ -89,14 +94,14 @@ final class LinkExceptionsScreen extends Screen {
         int contentWidth = Math.min(360, width - 24);
         int x = (width - contentWidth) / 2;
         graphics.centeredText(font, title, width / 2, 12, 0xFFFFFFFF);
-        graphics.centeredText(font, Component.literal("Eine Domain oder URL pro Zeile · Beispiel: twitch.tv/eigenername"),
+        graphics.centeredText(font, Localizer.literal("Eine Domain oder URL pro Zeile · Beispiel: twitch.tv/eigenername"),
                 width / 2, 24, 0xFFAAAAAA);
         for (int i = 0; i < visibleRows.size(); i++) {
-            graphics.text(font, Component.literal((visibleRows.get(i).index + 1) + "."), x, 46 + i * 24, 0xFFD9DFDC, true);
+            graphics.text(font, Localizer.literal((visibleRows.get(i).index + 1) + "."), x, 46 + i * 24, 0xFFD9DFDC, true);
         }
         if (config.linkExceptions.isEmpty()) {
-            graphics.centeredText(font, Component.literal("Noch sind keine URLs erlaubt."), width / 2, height / 2 - 8, 0xFFE0E0E0);
-            graphics.centeredText(font, Component.literal("Nicht freigegebene Links benötigen vor dem Senden eine Bestätigung."),
+            graphics.centeredText(font, Localizer.literal("Noch sind keine URLs erlaubt."), width / 2, height / 2 - 8, 0xFFE0E0E0);
+            graphics.centeredText(font, Localizer.literal("Nicht freigegebene Links benötigen vor dem Senden eine Bestätigung."),
                     width / 2, height / 2 + 5, 0xFF999999);
         }
     }

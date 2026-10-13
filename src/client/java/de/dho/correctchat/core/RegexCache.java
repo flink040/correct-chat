@@ -1,7 +1,9 @@
 package de.dho.correctchat.core;
 
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -9,11 +11,18 @@ import java.util.regex.PatternSyntaxException;
 /** Bounded cache that also remembers invalid expressions. */
 final class RegexCache {
     private static final int MAXIMUM_ENTRIES = 512;
-    private final ConcurrentHashMap<String, Optional<Pattern>> patterns = new ConcurrentHashMap<>();
+    private final Map<String, Optional<Pattern>> patterns = Collections.synchronizedMap(
+            new LinkedHashMap<>(64, 0.75F, true) {
+                @Override protected boolean removeEldestEntry(Map.Entry<String, Optional<Pattern>> eldest) {
+                    return size() > MAXIMUM_ENTRIES;
+                }
+            });
 
     Matcher matcher(String expression, String input) {
-        Optional<Pattern> pattern = patterns.computeIfAbsent(expression, RegexCache::compile);
-        if (patterns.size() > MAXIMUM_ENTRIES) patterns.clear();
+        Optional<Pattern> pattern;
+        synchronized (patterns) {
+            pattern = patterns.computeIfAbsent(expression, RegexCache::compile);
+        }
         return pattern.map(value -> value.matcher(input)).orElse(null);
     }
 

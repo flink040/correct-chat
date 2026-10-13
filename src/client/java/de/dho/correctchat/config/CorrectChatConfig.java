@@ -5,10 +5,12 @@ import java.util.List;
 import java.util.Locale;
 
 public final class CorrectChatConfig {
+    public static final int CURRENT_VERSION = 19;
     static final String DM_FILTER = "(?i)\\[(?:du\\s*->\\s*[^\\]]+|[^\\]]+\\s*->\\s*mir)\\]";
 
-    public int configVersion = 10;
+    public int configVersion = CURRENT_VERSION;
     public boolean enabled = true;
+    public UiLanguage uiLanguage = UiLanguage.AUTO;
 
     public boolean antiCommandChoker = true;
     public boolean chatTime = true;
@@ -20,12 +22,13 @@ public final class CorrectChatConfig {
     public ChatLogFormat chatLogFormat = ChatLogFormat.JSON;
     public int chatLogRetention = 50;
     public boolean uploadEnabled = false;
-    public String uploadEndpoint = "http://chatlog-api.hdskins.de/api/chatlog";
+    public String uploadEndpoint = "https://chatlog-api.hdskins.de/api/chatlog";
 
     public boolean textReplacement = true;
     public boolean chatListeners = true;
     public boolean copyButton = false;
     public boolean chatMessagePreview = true;
+    public ChatColor defaultChatColor = ChatColor.NONE;
     public String copyFormat = "&r[&aCopy&r] ";
     public String copyTooltip = "Click to copy.";
     public boolean antiSpam = false;
@@ -34,11 +37,20 @@ public final class CorrectChatConfig {
     public boolean linkFilter = false;
     public List<String> linkExceptions = new ArrayList<>();
     public List<String> ignoredPlayers = new ArrayList<>();
+    /** Exact rendered messages hidden globally after being marked as advertising. */
+    public List<String> blockedAdvertisements = new ArrayList<>();
 
     public boolean chatTabsEnabled = true;
     public boolean unreadBadges = true;
     public boolean mentionHighlight = true;
+    /** Scaled GUI dimensions; zero keeps Minecraft's current vanilla chat size. */
+    public int primaryChatWidth = 0;
+    public int primaryChatHeight = 0;
+    /** Percentage from 25 to 200; zero keeps Minecraft's current chat scale. */
+    public int primaryChatFontScalePercent = 0;
     public String primaryTabId = "all";
+    /** Empty keeps the backwards-compatible behavior of showing every tab in the main chat. */
+    public List<String> primaryTabIds = new ArrayList<>();
     public List<ChatTab> tabs = defaultTabs();
     public List<ChatWindow> windows = defaultWindows();
     public List<ServerProfile> serverProfiles = new ArrayList<>();
@@ -50,6 +62,8 @@ public final class CorrectChatConfig {
 
     public List<TextReplacement> replacements = new ArrayList<>();
     public List<ChatListener> listeners = new ArrayList<>();
+    /** Local visual/audio alarms created from chat messages. */
+    public List<ChatAlert> alerts = new ArrayList<>();
 
     public void normalize() {
         ConfigNormalizer.normalize(this);
@@ -59,6 +73,7 @@ public final class CorrectChatConfig {
         CorrectChatConfig copy = new CorrectChatConfig();
         copy.configVersion = configVersion;
         copy.enabled = enabled;
+        copy.uiLanguage = uiLanguage;
         copy.antiCommandChoker = antiCommandChoker;
         copy.chatTime = chatTime;
         copy.timeStyle = timeStyle;
@@ -73,6 +88,7 @@ public final class CorrectChatConfig {
         copy.chatListeners = chatListeners;
         copy.copyButton = copyButton;
         copy.chatMessagePreview = chatMessagePreview;
+        copy.defaultChatColor = defaultChatColor;
         copy.copyFormat = copyFormat;
         copy.copyTooltip = copyTooltip;
         copy.antiSpam = antiSpam;
@@ -81,12 +97,18 @@ public final class CorrectChatConfig {
         copy.linkFilter = linkFilter;
         copy.linkExceptions = new ArrayList<>(linkExceptions);
         copy.ignoredPlayers = new ArrayList<>(ignoredPlayers);
+        copy.blockedAdvertisements = new ArrayList<>(blockedAdvertisements);
         copy.chatTabsEnabled = chatTabsEnabled;
         copy.unreadBadges = unreadBadges;
         copy.mentionHighlight = mentionHighlight;
+        copy.primaryChatWidth = primaryChatWidth;
+        copy.primaryChatHeight = primaryChatHeight;
+        copy.primaryChatFontScalePercent = primaryChatFontScalePercent;
         copy.primaryTabId = primaryTabId;
+        copy.primaryTabIds = new ArrayList<>(primaryTabIds);
         replacements.forEach(value -> copy.replacements.add(value.copy()));
         listeners.forEach(value -> copy.listeners.add(value.copy()));
+        alerts.forEach(value -> copy.alerts.add(value.copy()));
         copy.tabs = new ArrayList<>();
         tabs.forEach(value -> copy.tabs.add(value.copy()));
         copy.windows = new ArrayList<>();
@@ -123,6 +145,11 @@ public final class CorrectChatConfig {
         return profile == null ? primaryTabId : profile.primaryTabId;
     }
 
+    public List<String> primaryTabIdsFor(String serverKey) {
+        ServerProfile profile = profileFor(serverKey);
+        return profile == null ? primaryTabIds : profile.primaryTabIds;
+    }
+
     public void setPrimaryTabFor(String serverKey, String tabId) {
         ServerProfile profile = profileFor(serverKey);
         if (profile == null) primaryTabId = tabId;
@@ -131,25 +158,14 @@ public final class CorrectChatConfig {
 
     static List<ChatTab> defaultTabs() {
         List<ChatTab> result = new ArrayList<>();
-        result.add(new ChatTab("all", "Alle", TabType.ALL, ""));
-        result.add(new ChatTab("players", "Spieler", TabType.PLAYER, ""));
-        result.add(new ChatTab("system", "System", TabType.SYSTEM, ""));
+        result.add(new ChatTab("all", "Chat", TabType.ALL, ""));
         result.add(new ChatTab("dm", "DM", TabType.REGEX, DM_FILTER));
         result.add(new ChatTab("twitch", "Twitch", TabType.TWITCH, ""));
         return result;
     }
 
     static List<ChatWindow> defaultWindows() {
-        List<ChatWindow> result = new ArrayList<>();
-        ChatWindow system = new ChatWindow();
-        system.name = "System";
-        system.x = -244;
-        system.y = 36;
-        system.width = 240;
-        system.height = 96;
-        system.activeTabId = "system";
-        result.add(system);
-        return result;
+        return new ArrayList<>();
     }
 
     private static String safe(String value, String fallback) {
@@ -192,6 +208,7 @@ public final class CorrectChatConfig {
         public boolean enabled = true;
         public String name = "";
         public MatchType matchType = MatchType.EQUALS;
+        public boolean caseSensitive = false;
         public String match = "";
         public String response = "";
         public boolean cancel = false;
@@ -222,6 +239,7 @@ public final class CorrectChatConfig {
             copy.enabled = enabled;
             copy.name = name;
             copy.matchType = matchType;
+            copy.caseSensitive = caseSensitive;
             copy.match = match;
             copy.response = response;
             copy.cancel = cancel;
@@ -234,10 +252,94 @@ public final class CorrectChatConfig {
         }
     }
 
+    public static final class ChatAlert {
+        public boolean enabled = true;
+        public String name = "Alarm";
+        public MatchType matchType = MatchType.EQUALS;
+        public boolean caseSensitive = false;
+        public String match = "";
+        /** Supports %message% for the complete matching message. */
+        public String text = "%message%";
+        public AlertDisplay display = AlertDisplay.TITLE;
+        public ChatColor color = ChatColor.RED;
+        public int fontScalePercent = 150;
+        public float durationSeconds = 5.0F;
+        public float cooldownSeconds = 0.0F;
+        public ServerFilter server = new ServerFilter();
+        public Sound sound = new Sound();
+
+        public void normalize() {
+            name = safe(name, "Alarm");
+            match = match == null ? "" : match;
+            text = safe(text, "%message%");
+            if (matchType == null) matchType = MatchType.EQUALS;
+            if (display == null) display = AlertDisplay.TITLE;
+            if (color == null || color == ChatColor.NONE) color = ChatColor.RED;
+            fontScalePercent = clamp(fontScalePercent, 50, 300);
+            durationSeconds = Math.max(0.5F, Math.min(60.0F, durationSeconds));
+            cooldownSeconds = Math.max(0.0F, Math.min(3600.0F, cooldownSeconds));
+            if (server == null) server = new ServerFilter();
+            if (sound == null) sound = new Sound();
+            server.normalize();
+            sound.normalize();
+        }
+
+        public ChatAlert copy() {
+            ChatAlert copy = new ChatAlert();
+            copy.enabled = enabled;
+            copy.name = name;
+            copy.matchType = matchType;
+            copy.caseSensitive = caseSensitive;
+            copy.match = match;
+            copy.text = text;
+            copy.display = display;
+            copy.color = color;
+            copy.fontScalePercent = fontScalePercent;
+            copy.durationSeconds = durationSeconds;
+            copy.cooldownSeconds = cooldownSeconds;
+            copy.server = server.copy();
+            copy.sound = sound.copy();
+            return copy;
+        }
+    }
+
     public enum MatchType { EQUALS, CONTAINS, REGEX, SIMPLIFIED_REGEX }
+    public enum AlertDisplay { TITLE, BOSSBAR, ACTIONBAR }
     public enum CooldownType { GLOBAL, PARTIAL }
-    public enum TabType { ALL, PLAYER, SYSTEM, TWITCH, CONTAINS, REGEX, MOD }
+    public enum TabType { ALL, PLAYER, SYSTEM, TWITCH, CONTAINS, EQUALS, REGEX, MOD }
+    public enum FilterRule { OR, AND }
     public enum ChatLogFormat { JSON, TEXT }
+    public enum UiLanguage { AUTO, DE_DE, EN_US }
+
+    public enum ChatColor {
+        NONE("", "Keine", null),
+        BLACK("&0", "Schwarz", net.minecraft.ChatFormatting.BLACK),
+        DARK_BLUE("&1", "Dunkel Blau", net.minecraft.ChatFormatting.DARK_BLUE),
+        DARK_GREEN("&2", "Dunkel Grün", net.minecraft.ChatFormatting.DARK_GREEN),
+        DARK_AQUA("&3", "Dunkel Aqua", net.minecraft.ChatFormatting.DARK_AQUA),
+        DARK_RED("&4", "Dunkel Rot", net.minecraft.ChatFormatting.DARK_RED),
+        DARK_PURPLE("&5", "Dunkel Lila", net.minecraft.ChatFormatting.DARK_PURPLE),
+        GOLD("&6", "Gold", net.minecraft.ChatFormatting.GOLD),
+        GRAY("&7", "Grau", net.minecraft.ChatFormatting.GRAY),
+        DARK_GRAY("&8", "Dunkel Grau", net.minecraft.ChatFormatting.DARK_GRAY),
+        BLUE("&9", "Blau", net.minecraft.ChatFormatting.BLUE),
+        GREEN("&a", "Grün", net.minecraft.ChatFormatting.GREEN),
+        AQUA("&b", "Aqua", net.minecraft.ChatFormatting.AQUA),
+        RED("&c", "Rot", net.minecraft.ChatFormatting.RED),
+        LIGHT_PURPLE("&d", "Hell Lila", net.minecraft.ChatFormatting.LIGHT_PURPLE),
+        YELLOW("&e", "Gelb", net.minecraft.ChatFormatting.YELLOW),
+        WHITE("&f", "Weiß", net.minecraft.ChatFormatting.WHITE);
+
+        public final String code;
+        public final String label;
+        public final net.minecraft.ChatFormatting formatting;
+
+        ChatColor(String code, String label, net.minecraft.ChatFormatting formatting) {
+            this.code = code;
+            this.label = label;
+            this.formatting = formatting;
+        }
+    }
 
     public static final class ChatTab {
         public String id = java.util.UUID.randomUUID().toString();
@@ -247,6 +349,7 @@ public final class CorrectChatConfig {
         /** Kept for backwards-compatible config imports. New code uses filters. */
         public String filter = "";
         public List<TabFilter> filters = new ArrayList<>();
+        public FilterRule filterRule = FilterRule.OR;
         /** Legacy context-menu rules, migrated to filters since config version 9. */
         public List<String> routingRules = new ArrayList<>();
 
@@ -263,6 +366,7 @@ public final class CorrectChatConfig {
             if (filters == null) filters = new ArrayList<>();
             filters.removeIf(value -> value == null);
             filters.forEach(TabFilter::normalize);
+            if (filterRule == null) filterRule = FilterRule.OR;
             if (routingRules == null) routingRules = new ArrayList<>();
             routingRules.removeIf(value -> value == null || value.isBlank());
             routingRules.replaceAll(String::trim);
@@ -297,6 +401,7 @@ public final class CorrectChatConfig {
             ChatTab copy = new ChatTab(id, name, type, filter);
             copy.filters = new ArrayList<>();
             filters.forEach(value -> copy.filters.add(value.copy()));
+            copy.filterRule = filterRule;
             copy.routingRules = new ArrayList<>(routingRules);
             return copy;
         }
@@ -331,16 +436,21 @@ public final class CorrectChatConfig {
         public int width = 240;
         public int height = 96;
         public String activeTabId = "all";
+        /** Empty keeps the backwards-compatible behavior of showing every tab in this window. */
+        public List<String> tabIds = new ArrayList<>();
 
         public void normalize() {
             name = safe(name, "Chatfenster");
             width = clamp(width, 100, 600);
             height = clamp(height, 40, 400);
             activeTabId = safe(activeTabId, "all");
+            if (tabIds == null) tabIds = new ArrayList<>();
+            tabIds.removeIf(value -> value == null || value.isBlank());
         }
         public ChatWindow copy() {
             ChatWindow copy = new ChatWindow();
             copy.name = name; copy.visible = visible; copy.x = x; copy.y = y; copy.width = width; copy.height = height; copy.activeTabId = activeTabId;
+            copy.tabIds = new ArrayList<>(tabIds);
             return copy;
         }
     }
@@ -350,6 +460,7 @@ public final class CorrectChatConfig {
         public String server = "";
         public boolean enabled = true;
         public String primaryTabId = "all";
+        public List<String> primaryTabIds = new ArrayList<>();
         public List<ChatTab> tabs = defaultTabs();
         public List<ChatWindow> windows = defaultWindows();
 
@@ -358,6 +469,7 @@ public final class CorrectChatConfig {
             server = server == null ? "" : server.trim();
             if (tabs == null) tabs = defaultTabs();
             if (windows == null) windows = defaultWindows();
+            if (primaryTabIds == null) primaryTabIds = new ArrayList<>();
             tabs.removeIf(value -> value == null);
             windows.removeIf(value -> value == null);
             tabs.forEach(ChatTab::normalize);
@@ -375,6 +487,7 @@ public final class CorrectChatConfig {
             copy.server = server;
             copy.enabled = enabled;
             copy.primaryTabId = primaryTabId;
+            copy.primaryTabIds = new ArrayList<>(primaryTabIds);
             copy.tabs = new ArrayList<>();
             tabs.forEach(value -> copy.tabs.add(value.copy()));
             copy.windows = new ArrayList<>();
@@ -401,11 +514,14 @@ public final class CorrectChatConfig {
     public static final class Sound {
         public boolean enabled = false;
         public String id = "minecraft:block.bell.resonate";
+        /** Optional local MP3, WAV or OGG file. When set, it takes precedence over id. */
+        public String file = "";
         public int volume = 100;
         public float pitch = 1.0F;
 
         public void normalize() {
             id = safe(id, "minecraft:block.bell.resonate");
+            file = file == null ? "" : file.trim();
             volume = clamp(volume, 0, 100);
             pitch = Math.max(0.1F, Math.min(4.0F, pitch));
         }
@@ -414,6 +530,7 @@ public final class CorrectChatConfig {
             Sound copy = new Sound();
             copy.enabled = enabled;
             copy.id = id;
+            copy.file = file;
             copy.volume = volume;
             copy.pitch = pitch;
             return copy;

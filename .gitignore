@@ -4,4 +4,8 @@ build/
 run/
 reverse-engineered/
 .idea/
+.diagnostics/
 *.log
+/correct-chat.json
+/correct-chat.json.bak
+/correct-chat-settings*.json

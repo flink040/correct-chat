@@ -1,5 +1,7 @@
 package de.dho.correctchat.gui;
 
+import de.dho.correctchat.core.Localizer;
+
 import de.dho.correctchat.config.CorrectChatConfig;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -9,29 +11,33 @@ import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 final class ReplacementEditorScreen extends Screen {
     private final Screen parent;
     private final CorrectChatConfig.TextReplacement entry;
+    private final Consumer<CorrectChatConfig.TextReplacement> commit;
     private final List<Label> labels = new ArrayList<>();
     private EditBox name, find, replacement, server;
 
-    ReplacementEditorScreen(Screen parent, CorrectChatConfig.TextReplacement entry) {
-        super(Component.literal("Textersetzung bearbeiten"));
+    ReplacementEditorScreen(Screen parent, CorrectChatConfig.TextReplacement entry,
+                            Consumer<CorrectChatConfig.TextReplacement> commit) {
+        super(Localizer.literal("Textersetzung bearbeiten"));
         this.parent = parent;
-        this.entry = entry;
+        this.entry = entry.copy();
+        this.commit = commit;
     }
 
     @Override protected void init() {
         labels.clear();
-        int x = width / 2 - 150, w = 300, y = 38;
-        name = field(x, y, w, "Name", entry.name); y += 24;
-        find = field(x, y, w, "Suchen", entry.find); y += 24;
-        replacement = field(x, y, w, "Ersetzen durch", entry.replacement); y += 24;
-        toggle(x, y, w, "Aktiv", entry.enabled, value -> entry.enabled = value); y += 24;
-        toggle(x, y, w, "Auch empfangen", entry.onReceive, value -> entry.onReceive = value); y += 24;
-        toggle(x, y, w, "Servergebunden", entry.server.enabled, value -> entry.server.enabled = value); y += 24;
-        toggle(x, y, w, "Im Einzelspieler", entry.server.singlePlayer, value -> entry.server.singlePlayer = value); y += 24;
+        int w = Math.min(300, width - 24), x = (width - w) / 2, y = 38;
+        name = field(x, y, w, "Name", entry.name); y += 22;
+        find = field(x, y, w, "Suchen", entry.find); y += 22;
+        replacement = field(x, y, w, "Ersetzen durch", entry.replacement); y += 22;
+        toggle(x, y, w, "Aktiv", entry.enabled, value -> entry.enabled = value); y += 22;
+        toggle(x, y, w, "Auch empfangen", entry.onReceive, value -> entry.onReceive = value); y += 22;
+        toggle(x, y, w, "Servergebunden", entry.server.enabled, value -> entry.server.enabled = value); y += 22;
+        toggle(x, y, w, "Im Einzelspieler", entry.server.singlePlayer, value -> entry.server.singlePlayer = value); y += 22;
         server = field(x, y, w, "Serveradresse", entry.server.address);
         bottomButtons();
     }
@@ -46,15 +52,15 @@ final class ReplacementEditorScreen extends Screen {
 
     private void save() {
         entry.name = name.getValue(); entry.find = find.getValue(); entry.replacement = replacement.getValue(); entry.server.address = server.getValue();
-        entry.normalize(); onClose();
+        entry.normalize(); commit.accept(entry); onClose();
     }
     private void bottomButtons() {
         int y = height - 28;
-        addRenderableWidget(Button.builder(Component.literal("Übernehmen"), b -> save()).bounds(width / 2 - 104, y, 100, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Zurück"), b -> onClose()).bounds(width / 2 + 4, y, 100, 20).build());
+        addRenderableWidget(Button.builder(Localizer.literal("Übernehmen"), b -> save()).bounds(width / 2 - 104, y, 100, 20).build());
+        addRenderableWidget(Button.builder(Localizer.literal("Zurück"), b -> onClose()).bounds(width / 2 + 4, y, 100, 20).build());
     }
     private EditBox field(int x, int y, int w, String label, String value) {
-        EditBox box = new EditBox(font, x + 112, y, w - 112, 20, Component.literal(label)); box.setMaxLength(512); box.setValue(value); addRenderableWidget(box); labels.add(new Label(Component.literal(label), x, y)); return box;
+        EditBox box = new EditBox(font, x + 112, y, w - 112, 20, Localizer.literal(label)); box.setMaxLength(512); box.setValue(value); addRenderableWidget(box); labels.add(new Label(Localizer.literal(label), x, y)); return box;
     }
     private void toggle(int x, int y, int w, String label, boolean current, java.util.function.Consumer<Boolean> setter) {
         final boolean[] state = {current};

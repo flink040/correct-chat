@@ -1,5 +1,7 @@
 package de.dho.correctchat;
 
+import de.dho.correctchat.core.Localizer;
+
 import de.dho.correctchat.config.ConfigManager;
 import de.dho.correctchat.config.CorrectChatConfig;
 import de.dho.correctchat.core.ChatEngine;
@@ -9,14 +11,13 @@ import de.dho.correctchat.gui.CorrectChatConfigScreen;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
-import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
-import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
 import net.minecraft.client.KeyMapping;
-import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
 
 import com.mojang.blaze3d.platform.InputConstants;
 
@@ -38,7 +39,6 @@ public final class CorrectChatClient implements ClientModInitializer {
         twitch.register();
         engine = new ChatEngine();
         engine.register();
-        registerChatMouseEvents();
 
         KeyMapping.Category category = KeyMapping.Category.register(net.minecraft.resources.Identifier.fromNamespaceAndPath(MOD_ID, "controls"));
         KeyMapping openConfig = KeyMappingHelper.registerKeyMapping(new KeyMapping(
@@ -51,22 +51,6 @@ public final class CorrectChatClient implements ClientModInitializer {
         LOGGER.info("Correct Chat initialized for Minecraft 26.2");
     }
 
-    private static void registerChatMouseEvents() {
-        ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
-            if (!(screen instanceof ChatScreen)) return;
-
-            // Fabric recreates a screen's event containers on every init/resize. Register on every
-            // AFTER_INIT invocation as well; suppressing a repeated screen instance loses the hooks.
-            ScreenMouseEvents.allowMouseDrag(screen).register((currentScreen, event, dragX, dragY) -> {
-                if (workspace == null) return true;
-                return !workspace.dragWindow(
-                        event.x(), event.y(), client.getWindow().getGuiScaledWidth(), client.getWindow().getGuiScaledHeight());
-            });
-            ScreenMouseEvents.allowMouseRelease(screen).register((currentScreen, event) ->
-                    workspace == null || !workspace.endWindowDrag());
-        });
-    }
-
     public static CorrectChatConfig config() { return config; }
     public static ChatEngine engine() { return engine; }
     public static ChatWorkspace workspace() { return workspace; }
@@ -76,12 +60,25 @@ public final class CorrectChatClient implements ClientModInitializer {
         updated.normalize();
         config = updated;
         ConfigManager.save(updated, LOGGER);
+        notifyConfigChanged();
+    }
+
+    public static CorrectChatConfig resetConfig() throws IOException {
+        CorrectChatConfig defaults = new CorrectChatConfig();
+        defaults.normalize();
+        ConfigManager.reset(defaults);
+        config = defaults;
+        notifyConfigChanged();
+        return defaults.copy();
+    }
+
+    private static void notifyConfigChanged() {
         if (engine != null) engine.onConfigChanged();
         if (workspace != null) workspace.onConfigChanged();
         if (twitch != null) twitch.onConfigChanged();
     }
 
     public static Component status(boolean enabled) {
-        return Component.literal(enabled ? "AN" : "AUS");
+        return Localizer.literal(enabled ? "AN" : "AUS");
     }
 }

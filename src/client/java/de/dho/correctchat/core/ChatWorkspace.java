@@ -38,10 +38,15 @@ public final class ChatWorkspace {
 
     private final ChatHistoryStore history = new ChatHistoryStore();
     private final Map<Component, String> componentMods = new IdentityHashMap<>();
+    private final Map<Component, String> sourceTexts = new IdentityHashMap<>();
+    private final Map<String, String> sourceTextsByRenderedText = new HashMap<>();
     private final ChatRouting routing = new ChatRouting(componentMods);
     private final Map<String, Integer> unreadByTab = new HashMap<>();
     private final Set<String> mentionedTabs = new java.util.HashSet<>();
     private final List<TabButton> activeButtons = new ArrayList<>();
+    private final Map<Component, Map<Integer, List<FormattedCharSequence>>> wrappedLines = new IdentityHashMap<>();
+    private final Map<Component, Boolean> blockedAdvertisementResults = new IdentityHashMap<>();
+    private AdvertisementFilter.RuleSet advertisementRules = AdvertisementFilter.compile(List.of());
     private int draggedWindow = -1;
     private int resizedWindow = -1;
     private boolean resizingPrimary;
@@ -58,11 +63,16 @@ public final class ChatWorkspace {
                 VanillaHudElements.CHAT,
                 Identifier.fromNamespaceAndPath(CorrectChatClient.MOD_ID, "chat_windows"),
                 this::renderWindows);
+        refreshAdvertisementRules();
         ensureEnabledTabSelection();
         applyPrimaryFilter();
     }
 
     public void record(Component component, Kind kind) {
+        record(component, kind, component == null ? "" : component.getString());
+    }
+
+    public void record(Component component, Kind kind, String sourceText) {
         if (component == null) return;
         CorrectChatConfig config = CorrectChatClient.config();
         String sourceMod = config == null ? null : routing.detectedMod(component, tabs(config));
@@ -70,9 +80,19 @@ public final class ChatWorkspace {
             sourceMod = pendingCommandMod;
         }
         history.add(component, kind, currentServerKey());
+        sourceTexts.put(component, sourceText == null ? component.getString() : sourceText);
+        sourceTextsByRenderedText.put(component.getString(), sourceText == null ? component.getString() : sourceText);
         if (sourceMod != null) componentMods.put(component, sourceMod);
         updateUnread(component, kind);
         trim();
+    }
+
+    /** Returns the server/source text before Correct Chat added timestamps or copy controls. */
+    public String sourceText(Component displayed) {
+        if (displayed == null) return "";
+        String exact = sourceTexts.get(displayed);
+        if (exact != null) return exact;
+        return sourceTextsByRenderedText.getOrDefault(displayed.getString(), displayed.getString());
     }
 
     public void noteCommand(String command) {
@@ -100,6 +120,10 @@ public final class ChatWorkspace {
 
     public void onConfigChanged() {
         routing.clear();
+        refreshAdvertisementRules();
+        // The configuration can replace the complete window list while a previously built
+        // ChatScreen still owns buttons that reference indices from the old list.
+        activeButtons.clear();
         ensureEnabledTabSelection();
         trim();
         applyPrimaryFilter();
@@ -116,10 +140,25 @@ public final class ChatWorkspace {
         Minecraft client = Minecraft.getInstance();
         if (client.gui == null || client.gui.hud == null) return;
         CorrectChatConfig config = CorrectChatClient.config();
-        client.gui.hud.getChat().setVisibleMessageFilter(message -> {
-            if (config == null || !config.enabled || !config.chatTabsEnabled) return true;
+        ChatComponent chat = client.gui.hud.getChat();
+        chat.setVisibleMessageFilter(message -> {
+            if (config == null || !config.enabled) return true;
+            if (isBlockedAdvertisement(message.content())) return false;
+            if (!config.chatTabsEnabled) return true;
             return matches(findTab(primaryTab(config)), message.content(), kindOf(message));
         });
+        // setVisibleMessageFilter rebuilds Minecraft's trimmed line cache immediately. The
+        // ChatComponent mixin separately makes sure filtered messages remain in allMessages so
+        // that this rebuild can reveal them after switching tabs.
+    }
+
+    /**
+     * Rebuilds the visible lines before the next frame is rendered. Messages must first pass
+     * Minecraft's insertion-time predicate so they remain available to other tabs; delaying this
+     * second filtering step until the end of a later tick would briefly show them in the active tab.
+     */
+    public void refreshPrimaryFilterNow() {
+        applyPrimaryFilter();
     }
 
     public void addTabButtons(Consumer<Button> add, Runnable rebuild, int screenWidth, int screenHeight) {
@@ -145,14 +184,16 @@ public final class ChatWorkspace {
         if (config == null || !config.enabled || !config.chatTabsEnabled) return false;
         int primaryRight = 4 + primaryChatWidth(screenWidth);
         int primaryTop = primaryChatTop(screenHeight);
+        boolean primaryCorner = mouseX >= primaryRight - 14 && mouseX <= primaryRight + 3
+                && mouseY >= primaryTop - 3 && mouseY <= primaryTop + 14;
         boolean primaryRightEdge = mouseX >= primaryRight - 5 && mouseX <= primaryRight + 3
                 && mouseY >= primaryTop - 3 && mouseY < screenHeight - 36;
         boolean primaryTopEdge = mouseY >= primaryTop - 3 && mouseY <= primaryTop + 5
                 && mouseX >= 0 && mouseX <= primaryRight + 3;
-        if (primaryRightEdge || primaryTopEdge) {
+        if (primaryCorner || primaryRightEdge || primaryTopEdge) {
             resizingPrimary = true;
-            resizeWidth = primaryRightEdge;
-            resizeHeight = primaryTopEdge;
+            resizeWidth = primaryCorner || primaryRightEdge;
+            resizeHeight = primaryCorner || primaryTopEdge;
             lastDragX = mouseX;
             lastDragY = mouseY;
             return true;
@@ -163,16 +204,20 @@ public final class ChatWorkspace {
             if (!window.visible) continue;
             int x = ChatWindowRenderer.resolvedX(window, screenWidth);
             int y = ChatWindowRenderer.resolvedY(window, screenHeight);
-            boolean rightEdge = mouseX >= x + window.width - 5 && mouseX <= x + window.width + 3
-                    && mouseY >= y && mouseY <= y + window.height + 3;
-            boolean bottomEdge = mouseY >= y + window.height - 5 && mouseY <= y + window.height + 3
-                    && mouseX >= x && mouseX <= x + window.width + 3;
-            if (rightEdge || bottomEdge) {
+            int right = x + Math.min(window.width, screenWidth - x);
+            int bottom = y + Math.min(window.height, screenHeight - y);
+            boolean corner = mouseX >= right - 14 && mouseX <= right + 3
+                    && mouseY >= bottom - 14 && mouseY <= bottom + 3;
+            boolean rightEdge = mouseX >= right - 5 && mouseX <= right + 3
+                    && mouseY >= y && mouseY <= bottom + 3;
+            boolean bottomEdge = mouseY >= bottom - 5 && mouseY <= bottom + 3
+                    && mouseX >= x && mouseX <= right + 3;
+            if (corner || rightEdge || bottomEdge) {
                 window.x = x;
                 window.y = y;
                 resizedWindow = i;
-                resizeWidth = rightEdge;
-                resizeHeight = bottomEdge;
+                resizeWidth = corner || rightEdge;
+                resizeHeight = corner || bottomEdge;
                 lastDragX = mouseX;
                 lastDragY = mouseY;
                 return true;
@@ -227,7 +272,7 @@ public final class ChatWorkspace {
     public Component messageAt(double mouseX, double mouseY, int screenWidth, int screenHeight) {
         CorrectChatConfig config = CorrectChatClient.config();
         Minecraft client = Minecraft.getInstance();
-        if (config == null || client.gui == null || client.gui.hud == null) return null;
+        if (config == null || !config.enabled || client.gui == null || client.gui.hud == null) return null;
 
         List<CorrectChatConfig.ChatWindow> windows = windows(config);
         for (int index = windows.size() - 1; index >= 0; index--) {
@@ -248,7 +293,7 @@ public final class ChatWorkspace {
             for (int entryIndex = entries.size() - 1; entryIndex >= 0; entryIndex--) {
                 ChatHistoryStore.Entry entry = entries.get(entryIndex);
                 if (!matches(active, entry.component, entry.kind)) continue;
-                List<FormattedCharSequence> lines = client.font.split(entry.component, Math.max(20, renderedWidth - 8));
+                List<FormattedCharSequence> lines = wrappedLines(entry.component, Math.max(20, renderedWidth - 8));
                 for (int line = lines.size() - 1; line >= 0; line--) {
                     if (lineY < contentTop) break outer;
                     if (mouseY >= lineY && mouseY < lineY + client.font.lineHeight) return entry.component;
@@ -257,12 +302,12 @@ public final class ChatWorkspace {
             }
         }
 
-        double scale = Math.max(0.01D, client.options.chatScale().get());
+        double scale = primaryChatScale();
         int chatBottom = (int)Math.floor((screenHeight - 40) / scale);
         int localX = (int)Math.floor(mouseX / scale);
         int localY = (int)Math.floor(mouseY / scale);
         int lineHeight = (int)(client.font.lineHeight * (client.options.chatLineSpacing().get() + 1.0D));
-        int rawWidth = ChatComponent.getWidth(client.options.chatWidth().get());
+        int rawWidth = primaryChatRawWidth();
         if (localX < -4 || localX > rawWidth + 4 || localY > chatBottom || lineHeight <= 0) return null;
         int visibleLine = (chatBottom - localY) / lineHeight;
         ChatComponent chat = client.gui.hud.getChat();
@@ -278,18 +323,15 @@ public final class ChatWorkspace {
         if (config == null) return false;
         if (resizingPrimary) {
             Minecraft client = Minecraft.getInstance();
-            double scale = Math.max(0.01D, client.options.chatScale().get());
             int dx = (int)Math.round(mouseX - lastDragX);
             int dy = (int)Math.round(mouseY - lastDragY);
             if (resizeWidth) {
-                int rawWidth = Math.max(40, Math.min(320,
-                        (int)Math.round((primaryChatWidth(screenWidth) + dx) / scale)));
-                client.options.chatWidth().set((rawWidth - 40) / 280.0D);
+                config.primaryChatWidth = Math.max(40,
+                        Math.min(primaryChatWidth(screenWidth) + dx, Math.max(40, screenWidth - 8)));
             }
             if (resizeHeight) {
-                int rawHeight = Math.max(20, Math.min(180,
-                        (int)Math.round((primaryChatHeight() - dy) / scale)));
-                client.options.chatHeightFocused().set((rawHeight - 20) / 160.0D);
+                config.primaryChatHeight = Math.max(20,
+                        Math.min(primaryChatHeight() - dy, Math.max(20, screenHeight - 40)));
             }
             client.gui.hud.getChat().rescaleChat();
             lastDragX = mouseX;
@@ -340,7 +382,6 @@ public final class ChatWorkspace {
         resizeWidth = false;
         resizeHeight = false;
         ConfigManager.saveLater(CorrectChatClient.config(), CorrectChatClient.LOGGER);
-        if (primaryResized) Minecraft.getInstance().options.save();
         if ((primaryResized || resized) && rebuildChatWidgets != null) rebuildChatWidgets.run();
         return true;
     }
@@ -348,31 +389,54 @@ public final class ChatWorkspace {
     /** Width of the vanilla chat after applying Minecraft's chat scale. */
     public int primaryChatWidth(int screenWidth) {
         Minecraft client = Minecraft.getInstance();
-        int width = (int)Math.ceil(ChatComponent.getWidth(client.options.chatWidth().get())
-                * client.options.chatScale().get());
+        CorrectChatConfig config = CorrectChatClient.config();
+        int width = config != null && config.primaryChatWidth > 0
+                ? config.primaryChatWidth
+                : (int)Math.ceil(ChatComponent.getWidth(client.options.chatWidth().get())
+                        * primaryChatScale());
         return Math.max(40, Math.min(width, Math.max(40, screenWidth - 8)));
     }
 
     public int primaryChatHeight() {
         Minecraft client = Minecraft.getInstance();
-        return (int)Math.ceil(ChatComponent.getHeight(client.options.chatHeightFocused().get())
-                * client.options.chatScale().get());
+        CorrectChatConfig config = CorrectChatClient.config();
+        int height = config != null && config.primaryChatHeight > 0
+                ? config.primaryChatHeight
+                : (int)Math.ceil(ChatComponent.getHeight(client.options.chatHeightFocused().get())
+                        * primaryChatScale());
+        int screenHeight = client.getWindow().getGuiScaledHeight();
+        return Math.max(20, Math.min(height, Math.max(20, screenHeight - 40)));
+    }
+
+    /** Raw dimensions consumed by ChatComponent before Minecraft applies the chat scale. */
+    public int primaryChatRawWidth() {
+        Minecraft client = Minecraft.getInstance();
+        double scale = primaryChatScale();
+        return Math.max(1, (int)Math.round(primaryChatWidth(client.getWindow().getGuiScaledWidth()) / scale));
+    }
+
+    public int primaryChatRawHeight() {
+        Minecraft client = Minecraft.getInstance();
+        double scale = primaryChatScale();
+        return Math.max(1, (int)Math.round(primaryChatHeight() / scale));
+    }
+
+    public double primaryChatScale() {
+        CorrectChatConfig config = CorrectChatClient.config();
+        if (config != null && config.primaryChatFontScalePercent > 0) {
+            return config.primaryChatFontScalePercent / 100.0D;
+        }
+        return Math.max(0.01D, Minecraft.getInstance().options.chatScale().get());
     }
 
     /** Applies a size entered in Correct Chat's own editor to the vanilla-backed primary chat. */
     public void setPrimaryChatSize(int width, int height, int screenWidth, int screenHeight) {
         Minecraft client = Minecraft.getInstance();
-        double scale = Math.max(0.01D, client.options.chatScale().get());
-        int maximumWidth = Math.min((int)Math.ceil(320 * scale), Math.max(40, screenWidth - 8));
-        int maximumHeight = Math.min((int)Math.ceil(180 * scale), Math.max(20, screenHeight - 40));
-        int scaledWidth = Math.max(40, Math.min(width, maximumWidth));
-        int scaledHeight = Math.max(20, Math.min(height, maximumHeight));
-        int rawWidth = Math.max(40, Math.min(320, (int)Math.round(scaledWidth / scale)));
-        int rawHeight = Math.max(20, Math.min(180, (int)Math.round(scaledHeight / scale)));
-        client.options.chatWidth().set((rawWidth - 40) / 280.0D);
-        client.options.chatHeightFocused().set((rawHeight - 20) / 160.0D);
+        CorrectChatConfig config = CorrectChatClient.config();
+        config.primaryChatWidth = Math.max(40, Math.min(width, Math.max(40, screenWidth - 8)));
+        config.primaryChatHeight = Math.max(20, Math.min(height, Math.max(20, screenHeight - 40)));
         client.gui.hud.getChat().rescaleChat();
-        client.options.save();
+        ConfigManager.save(config, CorrectChatClient.LOGGER);
     }
 
     private int primaryChatTop(int screenHeight) {
@@ -382,7 +446,7 @@ public final class ChatWorkspace {
     private void addTabRow(Consumer<Button> add, List<TabButton> bindings, int windowIndex,
                            int startX, int y, int availableWidth) {
         Minecraft client = Minecraft.getInstance();
-        List<CorrectChatConfig.ChatTab> tabs = visibleTabs(CorrectChatClient.config());
+        List<CorrectChatConfig.ChatTab> tabs = visibleTabs(CorrectChatClient.config(), windowIndex);
         int x = startX;
         for (CorrectChatConfig.ChatTab tab : tabs) {
             CorrectChatConfig config = CorrectChatClient.config();
@@ -398,7 +462,7 @@ public final class ChatWorkspace {
             add.accept(button);
             x += buttonWidth + 2;
         }
-        Button settings = Button.builder(Component.literal("+").withStyle(ChatFormatting.GREEN), pressed -> {
+        Button settings = Button.builder(Localizer.literal("+").withStyle(ChatFormatting.GREEN), pressed -> {
             if (client.gui.screen() instanceof ChatScreen parent) {
                 createTab(windowIndex);
                 client.gui.setScreen(new ChatAreaSettingsScreen(parent, windowIndex));
@@ -406,7 +470,7 @@ public final class ChatWorkspace {
         }).bounds(x, y, 16, 14).build();
         bindings.add(new TabButton(settings, windowIndex, null));
         add.accept(settings);
-        Button search = Button.builder(Component.literal("S").withStyle(ChatFormatting.AQUA), pressed -> {
+        Button search = Button.builder(Localizer.literal("S").withStyle(ChatFormatting.AQUA), pressed -> {
             if (client.gui.screen() instanceof ChatScreen parent) {
                 String active = windowIndex < 0 ? primaryTab(CorrectChatClient.config())
                         : windows(CorrectChatClient.config()).get(windowIndex).activeTabId;
@@ -430,12 +494,19 @@ public final class ChatWorkspace {
 
     private void refreshButtonLabels(List<TabButton> bindings) {
         CorrectChatConfig config = CorrectChatClient.config();
+        if (config == null || bindings.isEmpty()) return;
         List<CorrectChatConfig.ChatWindow> windows = windows(config);
         for (TabButton binding : bindings) {
             if (binding.tabId == null) continue;
-            String active = binding.windowIndex < 0
-                    ? primaryTab(config)
-                    : windows.get(binding.windowIndex).activeTabId;
+            String active;
+            if (binding.windowIndex < 0) {
+                active = primaryTab(config);
+            } else if (binding.windowIndex < windows.size()) {
+                active = windows.get(binding.windowIndex).activeTabId;
+            } else {
+                // Ignore a stale binding until ChatScreen rebuilds its widgets.
+                continue;
+            }
             CorrectChatConfig.ChatTab tab = findTab(binding.tabId);
             String name = tab == null ? "?" : tab.name;
             boolean mentioned = config.mentionHighlight && mentionedTabs.contains(binding.tabId);
@@ -443,7 +514,7 @@ public final class ChatWorkspace {
             String badgeSpace = config.unreadBadges ? "    " : "";
             ChatFormatting color = selected ? ChatFormatting.GREEN
                     : mentioned ? ChatFormatting.YELLOW : ChatFormatting.WHITE;
-            binding.button.setMessage(Component.literal(name + badgeSpace).withStyle(color));
+            binding.button.setMessage(Localizer.literal(name + badgeSpace).withStyle(color));
         }
     }
 
@@ -464,7 +535,7 @@ public final class ChatWorkspace {
             graphics.fill(left + 1, top, right - 1, top + 1, 0xFFE44757);
             graphics.fill(left, top + 1, right, top + 9, 0xFFE44757);
             graphics.fill(left + 1, top + 9, right - 1, top + 10, 0xFFE44757);
-            graphics.centeredText(client.font, Component.literal(count), left + badgeWidth / 2, top + 1, 0xFFFFFFFF);
+            graphics.centeredText(client.font, Localizer.literal(count), left + badgeWidth / 2, top + 1, 0xFFFFFFFF);
         }
     }
 
@@ -474,7 +545,7 @@ public final class ChatWorkspace {
         if (config == null || !config.enabled || !config.chatTabsEnabled) return;
         boolean focused = client.gui.screen() instanceof ChatScreen;
         ChatWindowRenderer.render(graphics, client.font, windows(config), history.snapshot(), focused,
-                this::primaryChatWidth, this::primaryChatTop, this::findTab, this::matches);
+                this::primaryChatWidth, this::primaryChatTop, this::findTab, this::matches, this::wrappedLines);
     }
 
     private Kind kindOf(GuiMessage message) {
@@ -484,7 +555,30 @@ public final class ChatWorkspace {
 
     private boolean matches(CorrectChatConfig.ChatTab tab, Component component, Kind kind) {
         CorrectChatConfig config = CorrectChatClient.config();
-        return config == null || routing.matches(tab, component, kind, tabs(config));
+        return !isBlockedAdvertisement(component)
+                && (config == null || routing.matches(tab, component, kind, tabs(config)));
+    }
+
+    private boolean isBlockedAdvertisement(Component component) {
+        return component != null && blockedAdvertisementResults.computeIfAbsent(
+                component, value -> advertisementRules.blocks(value.getString()));
+    }
+
+    private void refreshAdvertisementRules() {
+        CorrectChatConfig config = CorrectChatClient.config();
+        advertisementRules = AdvertisementFilter.compile(config == null ? List.of() : config.blockedAdvertisements);
+        blockedAdvertisementResults.clear();
+    }
+
+    private List<FormattedCharSequence> wrappedLines(Component component, int width) {
+        Map<Integer, List<FormattedCharSequence>> widths = wrappedLines.computeIfAbsent(component, ignored -> new HashMap<>());
+        List<FormattedCharSequence> cached = widths.get(width);
+        if (cached != null) return cached;
+        // Resizing can otherwise retain an entry for every intermediate pixel width.
+        if (widths.size() >= 4) widths.clear();
+        List<FormattedCharSequence> split = List.copyOf(Minecraft.getInstance().font.split(component, width));
+        widths.put(width, split);
+        return split;
     }
 
     private CorrectChatConfig.ChatTab findTab(String id) {
@@ -524,6 +618,7 @@ public final class ChatWorkspace {
         List<ChatHistoryStore.Entry> entries = history.snapshot();
         for (int i = entries.size() - 1; i >= 0 && result.size() < maximum; i--) {
             ChatHistoryStore.Entry entry = entries.get(i);
+            if (isBlockedAdvertisement(entry.component)) continue;
             if (tab != null && !matches(tab, entry.component, entry.kind)) continue;
             String searchable = entry.component.getString() + " " + entry.kind + " " + entry.server;
             if (!needle.isEmpty() && !searchable.toLowerCase(java.util.Locale.ROOT).contains(needle)) continue;
@@ -539,15 +634,22 @@ public final class ChatWorkspace {
         created.name = "Neuer Tab " + (tabs.size() + 1);
         tabs.add(created);
         List<CorrectChatConfig.ChatWindow> windows = windows(config);
-        if (windowIndex < 0) config.setPrimaryTabFor(currentServerKey(), created.id);
-        else if (windowIndex < windows.size()) windows.get(windowIndex).activeTabId = created.id;
+        if (windowIndex < 0) {
+            List<String> assigned = config.primaryTabIdsFor(currentServerKey());
+            if (!assigned.isEmpty()) assigned.add(created.id);
+            config.setPrimaryTabFor(currentServerKey(), created.id);
+        } else if (windowIndex < windows.size()) {
+            CorrectChatConfig.ChatWindow window = windows.get(windowIndex);
+            if (!window.tabIds.isEmpty()) window.tabIds.add(created.id);
+            window.activeTabId = created.id;
+        }
         ConfigManager.save(config, CorrectChatClient.LOGGER);
         applyPrimaryFilter();
     }
 
     private void updateUnread(Component component, Kind kind) {
         CorrectChatConfig config = CorrectChatClient.config();
-        if (config == null || !config.chatTabsEnabled) return;
+        if (config == null || !config.chatTabsEnabled || isBlockedAdvertisement(component)) return;
         String primary = primaryTab(config);
         List<CorrectChatConfig.ChatWindow> windows = windows(config);
         String playerName = "";
@@ -574,10 +676,32 @@ public final class ChatWorkspace {
     }
 
     private List<CorrectChatConfig.ChatTab> visibleTabs(CorrectChatConfig config) {
-        if (config.twitchEnabled) return tabs(config);
+        return visibleTabs(config, Integer.MIN_VALUE);
+    }
+
+    private List<CorrectChatConfig.ChatTab> visibleTabs(CorrectChatConfig config, int windowIndex) {
+        List<String> assigned;
+        if (windowIndex == Integer.MIN_VALUE) assigned = List.of();
+        else if (windowIndex < 0) assigned = config.primaryTabIdsFor(currentServerKey());
+        else {
+            List<CorrectChatConfig.ChatWindow> windows = windows(config);
+            assigned = windowIndex < windows.size() ? windows.get(windowIndex).tabIds : List.of();
+        }
         List<CorrectChatConfig.ChatTab> visible = new ArrayList<>();
-        for (CorrectChatConfig.ChatTab tab : tabs(config)) {
-            if (!tab.isTwitchOnly()) visible.add(tab);
+        List<CorrectChatConfig.ChatTab> all = tabs(config);
+        if (assigned.isEmpty()) {
+            for (CorrectChatConfig.ChatTab tab : all) {
+                if (config.twitchEnabled || !tab.isTwitchOnly()) visible.add(tab);
+            }
+            return visible;
+        }
+        for (String id : assigned) {
+            for (CorrectChatConfig.ChatTab tab : all) {
+                if (tab.id.equals(id) && (config.twitchEnabled || !tab.isTwitchOnly())) {
+                    visible.add(tab);
+                    break;
+                }
+            }
         }
         return visible;
     }
@@ -593,16 +717,22 @@ public final class ChatWorkspace {
     private void ensureEnabledTabSelection() {
         CorrectChatConfig config = CorrectChatClient.config();
         if (config == null || config.twitchEnabled) return;
-        List<CorrectChatConfig.ChatTab> visible = visibleTabs(config);
+        List<CorrectChatConfig.ChatTab> visible = visibleTabs(config, -1);
         if (visible.isEmpty()) return;
         String fallback = visible.getFirst().id;
         CorrectChatConfig.ChatTab primary = findTab(config.primaryTabFor(currentServerKey()));
-        if (primary == null || primary.isTwitchOnly()) {
+        if (primary == null || visible.stream().noneMatch(tab -> tab.id.equals(primary.id))) {
             config.setPrimaryTabFor(currentServerKey(), fallback);
         }
-        for (CorrectChatConfig.ChatWindow window : windows(config)) {
+        List<CorrectChatConfig.ChatWindow> windows = windows(config);
+        for (int index = 0; index < windows.size(); index++) {
+            CorrectChatConfig.ChatWindow window = windows.get(index);
+            List<CorrectChatConfig.ChatTab> windowTabs = visibleTabs(config, index);
+            if (windowTabs.isEmpty()) continue;
             CorrectChatConfig.ChatTab active = findTab(window.activeTabId);
-            if (active == null || active.isTwitchOnly()) window.activeTabId = fallback;
+            if (active == null || windowTabs.stream().noneMatch(tab -> tab.id.equals(active.id))) {
+                window.activeTabId = windowTabs.getFirst().id;
+            }
         }
         ConfigManager.save(config, CorrectChatClient.LOGGER);
     }
@@ -612,6 +742,10 @@ public final class ChatWorkspace {
         int maximum = config == null ? 1000 : config.maxStoredMessages;
         history.trim(maximum).forEach(component -> {
             componentMods.remove(component);
+            sourceTexts.remove(component);
+            sourceTextsByRenderedText.remove(component.getString());
+            wrappedLines.remove(component);
+            blockedAdvertisementResults.remove(component);
             routing.forget(component);
         });
     }

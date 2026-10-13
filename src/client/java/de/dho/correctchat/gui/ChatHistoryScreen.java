@@ -1,5 +1,7 @@
 package de.dho.correctchat.gui;
 
+import de.dho.correctchat.core.Localizer;
+
 import de.dho.correctchat.CorrectChatClient;
 import de.dho.correctchat.config.CorrectChatConfig;
 import de.dho.correctchat.core.ChatWorkspace;
@@ -28,43 +30,47 @@ public final class ChatHistoryScreen extends Screen {
     private int page;
 
     public ChatHistoryScreen(Screen parent, String selectedTabId) {
-        super(Component.literal("Chatverlauf durchsuchen"));
+        super(Localizer.literal("Chatverlauf durchsuchen"));
         this.parent = parent;
         this.tabs = new ArrayList<>(CorrectChatClient.workspace().activeTabs());
         this.selectedTabId = selectedTabId;
     }
 
     @Override protected void init() {
-        int left = width / 2 - 210;
-        query = new EditBox(font, left, 34, 260, 20, Component.literal("Suchtext"));
+        int contentWidth = Math.min(420, width - 24);
+        int left = (width - contentWidth) / 2;
+        int scopeWidth = Math.min(92, Math.max(70, contentWidth / 4));
+        int searchWidth = 70;
+        int queryWidth = Math.max(80, contentWidth - scopeWidth - searchWidth - 12);
+        query = new EditBox(font, left, 34, queryWidth, 20, Localizer.literal("Suchtext"));
         query.setMaxLength(256);
         query.setValue(queryValue);
         addRenderableWidget(query);
-        addRenderableWidget(Button.builder(Component.literal("Suchen"), button -> refresh())
-                .bounds(left + 266, 34, 72, 20).build());
-        addRenderableWidget(Button.builder(Component.literal(scopeName()), button -> {
+        addRenderableWidget(Button.builder(Localizer.literal("Suchen"), button -> refresh())
+                .bounds(left + queryWidth + 4, 34, searchWidth, 20).build());
+        addRenderableWidget(Button.builder(Localizer.literal(scopeName()), button -> {
             int current = indexOfSelected();
             current = (current + 1) % (tabs.size() + 1);
             selectedTabId = current == 0 ? null : tabs.get(current - 1).id;
-            button.setMessage(Component.literal(scopeName()));
+            button.setMessage(Localizer.literal(scopeName()));
             refresh();
-        }).bounds(left + 344, 34, 76, 20).build());
+        }).bounds(left + queryWidth + searchWidth + 8, 34, scopeWidth, 20).build());
 
         int bottom = height - 28;
-        Button previous = Button.builder(Component.literal("◀"), button -> { page = Math.max(0, page - 1); rebuildWidgets(); })
+        Button previous = Button.builder(Localizer.literal("◀"), button -> { page = Math.max(0, page - 1); rebuildWidgets(); })
                 .bounds(width / 2 - 104, bottom, 42, 20).build();
         previous.active = page > 0;
         addRenderableWidget(previous);
         int pages = Math.max(1, (results.size() + rows() - 1) / rows());
-        Button indicator = Button.builder(Component.literal((page + 1) + "/" + pages), button -> { })
+        Button indicator = Button.builder(Localizer.literal((page + 1) + "/" + pages), button -> { })
                 .bounds(width / 2 - 56, bottom, 52, 20).build();
         indicator.active = false;
         addRenderableWidget(indicator);
-        Button next = Button.builder(Component.literal("▶"), button -> { page = Math.min(pages - 1, page + 1); rebuildWidgets(); })
+        Button next = Button.builder(Localizer.literal("▶"), button -> { page = Math.min(pages - 1, page + 1); rebuildWidgets(); })
                 .bounds(width / 2 + 2, bottom, 42, 20).build();
         next.active = page + 1 < pages;
         addRenderableWidget(next);
-        addRenderableWidget(Button.builder(Component.literal("Zurück"), button -> onClose())
+        addRenderableWidget(Button.builder(Localizer.literal("Zurück"), button -> onClose())
                 .bounds(width / 2 + 50, bottom, 104, 20).build());
         if (results.isEmpty()) refresh(false);
     }
@@ -81,23 +87,24 @@ public final class ChatHistoryScreen extends Screen {
     @Override public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
         super.extractRenderState(graphics, mouseX, mouseY, delta);
         graphics.centeredText(font, title, width / 2, 12, 0xFFFFFFFF);
-        int left = width / 2 - 210;
+        int contentWidth = Math.min(420, width - 24);
+        int left = (width - contentWidth) / 2;
         int top = 63;
         int rowHeight = 18;
         int from = page * rows();
         int to = Math.min(results.size(), from + rows());
-        graphics.enableScissor(left, top, left + 420, height - 34);
+        graphics.enableScissor(left, top, left + contentWidth, height - 34);
         for (int i = from; i < to; i++) {
             ChatWorkspace.SearchResult result = results.get(i);
             int y = top + (i - from) * rowHeight;
-            graphics.fill(left, y, left + 420, y + 16, (i & 1) == 0 ? 0x70101010 : 0x70404040);
-            Component line = Component.literal(TIME.format(Instant.ofEpochMilli(result.receivedAt())) + " ")
+            graphics.fill(left, y, left + contentWidth, y + 16, (i & 1) == 0 ? 0x70101010 : 0x70404040);
+            Component line = Localizer.literal(TIME.format(Instant.ofEpochMilli(result.receivedAt())) + " ")
                     .withStyle(ChatFormatting.DARK_GRAY).append(result.component().copy());
             graphics.text(font, line, left + 4, y + 4, 0xFFFFFFFF, false);
         }
         graphics.disableScissor();
-        if (results.isEmpty()) graphics.centeredText(font, Component.literal("Keine passenden Nachrichten."), width / 2, 82, 0xFFAAAAAA);
-        graphics.text(font, Component.literal(results.size() + " Treffer · max. 1000"), left, height - 42, 0xFFAAAAAA, false);
+        if (results.isEmpty()) graphics.centeredText(font, Localizer.literal("Keine passenden Nachrichten."), width / 2, 82, 0xFFAAAAAA);
+        graphics.text(font, Localizer.literal(results.size() + " Treffer · max. 1000"), left, height - 42, 0xFFAAAAAA, false);
     }
 
     private int rows() { return Math.max(1, (height - 105) / 18); }

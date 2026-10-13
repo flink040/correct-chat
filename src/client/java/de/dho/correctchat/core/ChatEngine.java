@@ -18,7 +18,9 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.sounds.SoundEvent;
 
 import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -38,19 +40,25 @@ public final class ChatEngine {
     static final String INTERNAL_CANCEL_LINK = "correctchat-cancel-link";
     private static final Pattern PLAYER_NAME = Pattern.compile("[A-Za-z0-9_]{1,16}");
     private final ChatLogService logService = new ChatLogService();
+    private final ChatAlertOverlay alertOverlay = new ChatAlertOverlay();
     private final Map<String, List<Long>> responseUsage = new HashMap<>();
     private final Map<CorrectChatConfig.ChatListener, Long> globalCooldowns = new IdentityHashMap<>();
     private final Map<CorrectChatConfig.ChatListener, Map<String, Long>> partialCooldowns = new IdentityHashMap<>();
+    private final Map<CorrectChatConfig.ChatAlert, Long> alertCooldowns = new IdentityHashMap<>();
     private final RegexCache regexes = new RegexCache();
     private final Set<String> warnedInvalidRegexes = ConcurrentHashMap.newKeySet();
+    private volatile long responseGeneration;
+    private volatile String cachedTimePattern;
+    private volatile DateTimeFormatter cachedTimeFormatter;
     private String bypassOnce;
 
     public void register() {
+        alertOverlay.register();
         registerInternalCommands();
         ClientSendMessageEvents.ALLOW_CHAT.register(this::allowOutgoingChat);
-        ClientSendMessageEvents.MODIFY_CHAT.register(this::replaceOutgoing);
+        ClientSendMessageEvents.MODIFY_CHAT.register(this::replaceOutgoingChat);
         ClientSendMessageEvents.ALLOW_COMMAND.register(this::allowOutgoingCommand);
-        ClientSendMessageEvents.MODIFY_COMMAND.register(this::replaceOutgoing);
+        ClientSendMessageEvents.MODIFY_COMMAND.register(this::replaceOutgoingCommand);
 
         ClientReceiveMessageEvents.ALLOW_CHAT.register((message, signed, sender, params, timestamp) -> {
             Processed processed = processIncoming(message, ChatWorkspace.Kind.PLAYER, sender);
@@ -76,14 +84,26 @@ public final class ChatEngine {
     }
 
     public void onConfigChanged() {
+        responseGeneration++;
         responseUsage.clear();
         globalCooldowns.clear();
         partialCooldowns.clear();
+        alertCooldowns.clear();
         regexes.clear();
         warnedInvalidRegexes.clear();
+        cachedTimePattern = null;
+        cachedTimeFormatter = null;
+        alertOverlay.clear();
+        CustomSoundPlayer.stopAll();
     }
 
     public ChatLogService logs() { return logService; }
+    public void stopCustomSounds() { CustomSoundPlayer.stopAll(); }
+
+    public Component processTwitch(Component original) {
+        Processed processed = processIncoming(original, ChatWorkspace.Kind.TWITCH, null);
+        return processed.cancelled ? null : processed.component;
+    }
 
     private void registerInternalCommands() {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
@@ -166,7 +186,18 @@ public final class ChatEngine {
         return true;
     }
 
-    private String replaceOutgoing(String message) {
+    private String replaceOutgoingChat(String message) {
+        String result = replaceOutgoingText(message);
+        CorrectChatConfig config = CorrectChatClient.config();
+        if (!config.enabled || config.defaultChatColor == CorrectChatConfig.ChatColor.NONE) return result;
+        return config.defaultChatColor.code + result;
+    }
+
+    private String replaceOutgoingCommand(String command) {
+        return replaceOutgoingText(command);
+    }
+
+    private String replaceOutgoingText(String message) {
         CorrectChatConfig config = CorrectChatClient.config();
         if (!config.enabled || !config.textReplacement) return message;
         String result = message;
@@ -181,15 +212,16 @@ public final class ChatEngine {
     private Processed processIncoming(Component original, ChatWorkspace.Kind kind, GameProfile sender) {
         CorrectChatConfig config = CorrectChatClient.config();
         if (!config.enabled) {
-            CorrectChatClient.workspace().record(original, kind);
             return new Processed(original, false, false);
         }
         String plain = original.getString();
         if (isIgnoredMessage(config, plain, sender)) {
             return new Processed(original, true, false);
         }
-        logService.add(plain);
-        boolean cancelled = config.chatListeners && runListeners(plain);
+        if (kind == ChatWorkspace.Kind.TWITCH) logService.add(plain, "twitch:#" + config.twitchChannel);
+        else logService.add(plain);
+        runAlerts(plain, kind);
+        boolean cancelled = config.chatListeners && runListeners(plain, kind);
         if (cancelled) return new Processed(original, true, false);
 
         Component result = original;
@@ -204,9 +236,7 @@ public final class ChatEngine {
             }
         }
         if (config.chatTime) {
-            String time;
-            try { time = new SimpleDateFormat(config.timeFormat, Locale.ROOT).format(System.currentTimeMillis()); }
-            catch (IllegalArgumentException exception) { time = new SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(System.currentTimeMillis()); }
+            String time = formatTime(config.timeFormat, System.currentTimeMillis());
             result = LegacyText.parse(config.timeStyle.replace("%time%", time)).append(result.copy());
             changed = true;
         }
@@ -218,8 +248,23 @@ public final class ChatEngine {
             result = button.copy().append(result.copy());
             changed = true;
         }
-        CorrectChatClient.workspace().record(result, kind);
+        CorrectChatClient.workspace().record(result, kind, plain);
         return new Processed(result, false, changed);
+    }
+
+    private String formatTime(String pattern, long timestamp) {
+        String requested = pattern == null || pattern.isBlank() ? "HH:mm:ss" : pattern;
+        DateTimeFormatter formatter = cachedTimeFormatter;
+        if (formatter == null || !requested.equals(cachedTimePattern)) {
+            try {
+                formatter = DateTimeFormatter.ofPattern(requested, Locale.ROOT).withZone(ZoneId.systemDefault());
+            } catch (IllegalArgumentException exception) {
+                formatter = DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT).withZone(ZoneId.systemDefault());
+            }
+            cachedTimeFormatter = formatter;
+            cachedTimePattern = requested;
+        }
+        return formatter.format(Instant.ofEpochMilli(timestamp));
     }
 
     private int toggleIgnoredPlayer(String player) {
@@ -295,7 +340,7 @@ public final class ChatEngine {
         Minecraft.getInstance().gui.hud.getChat().addClientSystemMessage(LegacyText.parse(message));
     }
 
-    private boolean runListeners(String message) {
+    private boolean runListeners(String message, ChatWorkspace.Kind kind) {
         CorrectChatConfig config = CorrectChatClient.config();
         boolean cancel = false;
         for (CorrectChatConfig.ChatListener listener : config.listeners) {
@@ -305,18 +350,46 @@ public final class ChatEngine {
             String key = listener.name + '\0' + listener.match + '\0' + listener.response;
             boolean canRespond = !config.antiSpam || antiSpamAllows(key, config.maxResponses, config.responseWindowMinutes);
             String response = substituteGroups(listener.response, match.matcher);
-            if (!response.isBlank() && (canRespond || response.startsWith("/"))) scheduleResponse(response, listener.delaySeconds);
-            if (listener.sound.enabled) scheduleSound(listener.sound, listener.delaySeconds);
+            if (!response.isBlank() && (canRespond || response.startsWith("/"))) scheduleResponse(response, listener.delaySeconds, kind);
+            if (listener.sound.enabled) scheduleSound(listener.sound, listener.delaySeconds, kind);
             cancel |= listener.cancel;
         }
         return cancel;
     }
 
+    private void runAlerts(String message, ChatWorkspace.Kind kind) {
+        CorrectChatConfig config = CorrectChatClient.config();
+        for (CorrectChatConfig.ChatAlert alert : config.alerts) {
+            if (!alert.enabled || alert.match.isBlank() || !allowedOnServer(alert.server)) continue;
+            if (!matches(alert, message) || !alertCooldownAllows(alert)) continue;
+            alertOverlay.show(alert, message);
+            if (alert.sound.enabled) scheduleSound(alert.sound, 0.0F, kind);
+        }
+    }
+
+    private boolean matches(CorrectChatConfig.ChatAlert alert, String message) {
+        String patternText = alert.match.replace("&player", playerName());
+        return switch (alert.matchType) {
+            case EQUALS -> alert.caseSensitive ? message.equals(patternText) : message.equalsIgnoreCase(patternText);
+            case CONTAINS -> alert.caseSensitive ? message.contains(patternText)
+                    : message.toLowerCase(Locale.ROOT).contains(patternText.toLowerCase(Locale.ROOT));
+            case REGEX, SIMPLIFIED_REGEX -> {
+                if (alert.matchType == CorrectChatConfig.MatchType.SIMPLIFIED_REGEX) patternText = simplifiedRegex(patternText);
+                Matcher matcher = regexes.matcher(patternText, message);
+                if (matcher == null && warnedInvalidRegexes.add(patternText)) {
+                    CorrectChatClient.LOGGER.warn("Invalid chat alert regex '{}'", patternText);
+                }
+                yield matcher != null && matcher.matches();
+            }
+        };
+    }
+
     private Match match(CorrectChatConfig.ChatListener listener, String message) {
         String patternText = listener.match.replace("&player", playerName());
         return switch (listener.matchType) {
-            case EQUALS -> new Match(message.equals(patternText), null);
-            case CONTAINS -> new Match(message.contains(patternText), null);
+            case EQUALS -> new Match(listener.caseSensitive ? message.equals(patternText) : message.equalsIgnoreCase(patternText), null);
+            case CONTAINS -> new Match(listener.caseSensitive ? message.contains(patternText)
+                    : message.toLowerCase(Locale.ROOT).contains(patternText.toLowerCase(Locale.ROOT)), null);
             case REGEX, SIMPLIFIED_REGEX -> {
                 if (listener.matchType == CorrectChatConfig.MatchType.SIMPLIFIED_REGEX) patternText = simplifiedRegex(patternText);
                 Matcher matcher = regexes.matcher(patternText, message);
@@ -329,6 +402,15 @@ public final class ChatEngine {
                 yield new Match(matcher.matches(), matcher);
             }
         };
+    }
+
+    private boolean alertCooldownAllows(CorrectChatConfig.ChatAlert alert) {
+        if (alert.cooldownSeconds <= 0.0F) return true;
+        long now = System.currentTimeMillis();
+        long previous = alertCooldowns.getOrDefault(alert, 0L);
+        if (now - previous < (long)(alert.cooldownSeconds * 1000.0F)) return false;
+        alertCooldowns.put(alert, now);
+        return true;
     }
 
     private boolean cooldownAllows(CorrectChatConfig.ChatListener listener, Matcher matcher) {
@@ -360,22 +442,58 @@ public final class ChatEngine {
         return allowed;
     }
 
-    private void scheduleResponse(String response, float delaySeconds) {
+    private void scheduleResponse(String response, float delaySeconds, ChatWorkspace.Kind kind) {
+        Minecraft scheduledClient = Minecraft.getInstance();
+        var scheduledConnection = scheduledClient.getConnection();
+        String scheduledTwitchChannel = CorrectChatClient.config().twitchChannel;
+        long scheduledGeneration = responseGeneration;
         CompletableFuture.delayedExecutor(Math.max(0L, (long)(delaySeconds * 1000.0F)), TimeUnit.MILLISECONDS).execute(() -> {
             Minecraft client = Minecraft.getInstance();
             client.execute(() -> {
-                if (client.getConnection() == null) return;
+                CorrectChatConfig config = CorrectChatClient.config();
+                if (config == null || !config.enabled || !config.chatListeners
+                        || scheduledGeneration != responseGeneration) return;
+                if (kind == ChatWorkspace.Kind.TWITCH) {
+                    if (!config.twitchEnabled || !config.twitchChannel.equals(scheduledTwitchChannel)
+                            || CorrectChatClient.twitch() == null) return;
+                    CorrectChatClient.twitch().sendMessage(response);
+                    return;
+                }
+                if (scheduledConnection == null || client.getConnection() != scheduledConnection) return;
                 if (response.startsWith("/")) client.getConnection().sendCommand(response.substring(1));
                 else client.getConnection().sendChat(response);
             });
         });
     }
 
-    private void scheduleSound(CorrectChatConfig.Sound sound, float delaySeconds) {
-        Identifier id = Identifier.tryParse(sound.id);
-        if (id == null) return;
-        SimpleSoundInstance instance = SimpleSoundInstance.forUI(SoundEvent.createVariableRangeEvent(id), sound.pitch, sound.volume / 100.0F);
-        Minecraft.getInstance().getSoundManager().playDelayed(instance, Math.max(0, Math.round(delaySeconds * 20.0F)));
+    private void scheduleSound(CorrectChatConfig.Sound sound, float delaySeconds, ChatWorkspace.Kind kind) {
+        CorrectChatConfig.Sound scheduledSound = sound.copy();
+        Minecraft scheduledClient = Minecraft.getInstance();
+        var scheduledConnection = scheduledClient.getConnection();
+        String scheduledTwitchChannel = CorrectChatClient.config().twitchChannel;
+        long scheduledGeneration = responseGeneration;
+        CompletableFuture.delayedExecutor(Math.max(0L, (long)(delaySeconds * 1000.0F)), TimeUnit.MILLISECONDS)
+                .execute(() -> scheduledClient.execute(() -> {
+                    CorrectChatConfig config = CorrectChatClient.config();
+                    if (config == null || !config.enabled || scheduledGeneration != responseGeneration
+                            || (kind == ChatWorkspace.Kind.TWITCH
+                                ? !config.twitchEnabled || !config.twitchChannel.equals(scheduledTwitchChannel)
+                                : scheduledConnection == null || scheduledClient.getConnection() != scheduledConnection)) return;
+                    if (CustomSoundPlayer.supports(scheduledSound.file)) {
+                        CustomSoundPlayer.play(scheduledSound.file, scheduledSound.volume, scheduledSound.pitch);
+                        return;
+                    }
+                    if (!scheduledSound.file.isBlank()) {
+                        CorrectChatClient.LOGGER.warn("Custom alarm sound does not exist or is unsupported: {}", scheduledSound.file);
+                        return;
+                    }
+                    Identifier id = Identifier.tryParse(scheduledSound.id);
+                    if (id == null) return;
+                    SimpleSoundInstance instance = SimpleSoundInstance.forUI(
+                            SoundEvent.createVariableRangeEvent(id), scheduledSound.pitch,
+                            scheduledSound.volume / 100.0F);
+                    scheduledClient.getSoundManager().play(instance);
+                }));
     }
 
     private boolean allowedOnServer(CorrectChatConfig.ServerFilter filter) {
@@ -434,16 +552,16 @@ public final class ChatEngine {
     private static void showChokerWarning(String message) {
         Minecraft client = Minecraft.getInstance();
         String encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(message.getBytes(StandardCharsets.UTF_8));
-        MutableComponent corrected = Component.literal("§a[KORREKTEN BEFEHL SENDEN]")
+        MutableComponent corrected = Localizer.literal("§a[KORREKTEN BEFEHL SENDEN]")
                 .withStyle(style -> style.withClickEvent(new ClickEvent.RunCommand("/" + message.substring(1))));
-        MutableComponent anyway = Component.literal("§b[NACHRICHT TROTZDEM SENDEN]")
+        MutableComponent anyway = Localizer.literal("§b[NACHRICHT TROTZDEM SENDEN]")
                 .withStyle(style -> style.withClickEvent(new ClickEvent.RunCommand("/" + INTERNAL_SEND + encoded)));
-        client.gui.hud.getChat().addClientSystemMessage(Component.literal("§c§m-----------------------------------"));
-        client.gui.hud.getChat().addClientSystemMessage(Component.literal("§e⚠ §cMisslungenen Befehl erkannt! §e⚠"));
-        client.gui.hud.getChat().addClientSystemMessage(Component.literal("§cEingabe: §7'§f" + message + "§7'"));
+        client.gui.hud.getChat().addClientSystemMessage(Localizer.literal("§c§m-----------------------------------"));
+        client.gui.hud.getChat().addClientSystemMessage(Localizer.literal("§e⚠ §cMisslungenen Befehl erkannt! §e⚠"));
+        client.gui.hud.getChat().addClientSystemMessage(Localizer.literal("§cEingabe: §7'§f" + message + "§7'"));
         client.gui.hud.getChat().addClientSystemMessage(corrected);
         client.gui.hud.getChat().addClientSystemMessage(anyway);
-        client.gui.hud.getChat().addClientSystemMessage(Component.literal("§c§m-----------------------------------"));
+        client.gui.hud.getChat().addClientSystemMessage(Localizer.literal("§c§m-----------------------------------"));
     }
 
     private record Processed(Component component, boolean cancelled, boolean changed) { }

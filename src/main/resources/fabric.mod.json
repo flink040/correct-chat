@@ -3,8 +3,10 @@
   "id": "correctchat",
   "version": "${version}",
   "name": "Correct Chat",
-  "description": "Fabric port of AntiCommandChoker, ChatLog, ChatTime and Chat Utilities.",
-  "authors": ["dho", "port based on addons by kadse, HDSkins, JumpingPxl and Fesa"],
+  "description": "Client-side chat workspace with tabs, filters, logs, automation, alerts and Twitch integration.",
+  "icon": "assets/correctchat/icon.png",
+  "authors": ["dho"],
+  "contributors": ["kadse", "HDSkins", "JumpingPxl", "Fesa"],
   "license": "All-Rights-Reserved",
   "environment": "client",
   "entrypoints": {

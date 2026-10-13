@@ -22,6 +22,7 @@ loom {
 
 repositories {
     maven { url = 'https://maven.terraformersmc.com/releases/' }
+    mavenCentral()
 }
 
 dependencies {
@@ -29,12 +30,51 @@ dependencies {
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
     implementation "com.terraformersmc:modmenu:${project.modmenu_version}"
+    testImplementation "org.junit.jupiter:junit-jupiter:${project.junit_version}"
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    include implementation("com.googlecode.soundlibs:mp3spi:1.9.5.4")
+    include implementation("com.googlecode.soundlibs:vorbisspi:1.0.3.3")
+    include implementation("com.googlecode.soundlibs:jlayer:1.0.1.4")
+    include implementation("com.googlecode.soundlibs:jorbis:0.0.17.4")
+    include implementation("com.googlecode.soundlibs:tritonus-share:0.3.7.4")
+}
+
+sourceSets {
+    test {
+        compileClasspath += sourceSets.client.output
+        runtimeClasspath += sourceSets.client.output
+    }
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    testLogging {
+        events 'failed'
+        exceptionFormat = 'full'
+    }
+}
+
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+tasks.named('jar') {
+    manifest {
+        attributes(
+                'Implementation-Title': 'Correct Chat',
+                'Implementation-Version': project.version
+        )
+    }
 }
 
 processResources {
     inputs.property 'version', project.version
     filesMatching('fabric.mod.json') {
         expand version: inputs.properties.version
+    }
+    from('THIRD_PARTY_NOTICE.md') {
+        into 'META-INF'
     }
 }
 
@@ -46,4 +86,69 @@ java {
     withSourcesJar()
     sourceCompatibility = JavaVersion.VERSION_25
     targetCompatibility = JavaVersion.VERSION_25
+}
+
+def releaseVersion = project.version.toString()
+def releaseArchiveBaseName = project.archives_base_name.toString()
+
+tasks.register('verifyReleaseNotices') {
+    dependsOn tasks.named('jar'), tasks.named('sourcesJar')
+    doLast {
+        def releaseJar = tasks.named('jar').get().archiveFile.get().asFile
+        def entries = zipTree(releaseJar).files.collect { it.path.replace('\\', '/') }
+        [
+                'fabric.mod.json',
+                'correctchat.client.mixins.json',
+                'assets/correctchat/icon.png',
+                'assets/correctchat/lang/de_de.json',
+                'assets/correctchat/lang/en_us.json',
+                'META-INF/THIRD_PARTY_NOTICE.md',
+                'META-INF/LICENSES/LGPL-2.1.txt'
+        ].each { required ->
+            if (!entries.any { it.endsWith('/' + required) }) {
+                throw new GradleException("Release JAR is missing ${required}")
+            }
+        }
+        ['correct-chat.json', 'correct-chat.json.bak', 'reverse-engineered', '.diagnostics'].each { forbidden ->
+            if (entries.any { it.endsWith('/' + forbidden) }) {
+                throw new GradleException("Release JAR must not contain ${forbidden}")
+            }
+        }
+        def metadata = zipTree(releaseJar).matching { include 'fabric.mod.json' }.singleFile.text
+        if (metadata.contains('${version}')) {
+            throw new GradleException('Release JAR contains unexpanded version metadata')
+        }
+        def parsedMetadata = new groovy.json.JsonSlurper().parseText(metadata)
+        if (parsedMetadata.version != releaseVersion) {
+            throw new GradleException("fabric.mod.json version ${parsedMetadata.version} does not match ${releaseVersion}")
+        }
+        def manifestVersion = new java.util.jar.JarFile(releaseJar).withCloseable {
+            it.manifest.mainAttributes.getValue('Implementation-Version')
+        }
+        if (manifestVersion != releaseVersion) {
+            throw new GradleException("Manifest version ${manifestVersion} does not match ${releaseVersion}")
+        }
+
+        def expectedJarName = "${releaseArchiveBaseName}-${releaseVersion}.jar"
+        ['README.md', 'ANLEITUNG.md'].each { document ->
+            if (!file(document).text.contains(expectedJarName)) {
+                throw new GradleException("${document} does not reference ${expectedJarName}")
+            }
+        }
+        if (!file('CHANGELOG.md').text.contains("## ${releaseVersion} ")) {
+            throw new GradleException("CHANGELOG.md has no ${releaseVersion} release heading")
+        }
+
+        def sourcesJar = tasks.named('sourcesJar').get().archiveFile.get().asFile
+        def sourceEntries = zipTree(sourcesJar).files.collect { it.path.replace('\\', '/') }
+        ['reverse-engineered', '.diagnostics', 'correct-chat.json'].each { forbidden ->
+            if (sourceEntries.any { it.contains('/' + forbidden + '/') || it.endsWith('/' + forbidden) }) {
+                throw new GradleException("Sources JAR must not contain ${forbidden}")
+            }
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('verifyReleaseNotices')
 }

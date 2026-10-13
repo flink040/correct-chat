@@ -7,6 +7,7 @@ import net.minecraft.network.chat.contents.TranslatableContents;
 
 import java.util.List;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -32,8 +33,11 @@ final class ChatRouting {
                     + "|\\[vl:\\s*\\d+\\].*\\[ping:\\s*\\d+\\].*\\[tps:",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern OPSUCHT_ANTICHEAT_ALERT = Pattern.compile(
-            "(?:\\(\\s*\\d+\\s*ms\\s*\\)\\s+benutzt\\b|\\bwurde\\s+bestraft\\s+für\\b)"
-                    + ".+\\([^()\\r\\n]+/[a-z0-9]+\\)(?:\\s*\\[\\s*(?:x\\s*)?\\d+\\s*/\\s*\\d+\\s*\\])?",
+            "(?:\\(\\s*\\d+\\s*ms\\s*\\)\\s+benutzt\\b.+(?:"
+                    + "\\([^()\\r\\n]+/[a-z0-9]+\\)(?:\\s*\\[\\s*(?:x\\s*)?\\d+\\s*/\\s*\\d+\\s*\\])?"
+                    + "|\\s-\\s*\\d+\\s*/\\s*\\d+\\b)"
+                    + "|\\bwurde\\s+bestraft\\s+für\\b.+\\([^()\\r\\n]+/[a-z0-9]+\\)"
+                    + "(?:\\s*\\[\\s*(?:x\\s*)?\\d+\\s*/\\s*\\d+\\s*\\])?)",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final List<String> VULCAN_MESSAGE_MARKERS = List.of(
             "violations for all online players were reset",
@@ -50,6 +54,7 @@ final class ChatRouting {
 
     private final Map<Component, String> componentMods;
     private final RegexCache regexes = new RegexCache();
+    private final IdentityHashMap<Component, String> lowerTexts = new IdentityHashMap<>();
     private final IdentityHashMap<Component, EnumMap<ChatWorkspace.Kind, IdentityHashMap<CorrectChatConfig.ChatTab, Boolean>>>
             matchResults = new IdentityHashMap<>();
 
@@ -73,11 +78,13 @@ final class ChatRouting {
 
     void clear() {
         matchResults.clear();
+        lowerTexts.clear();
         regexes.clear();
     }
 
     void forget(Component component) {
         matchResults.remove(component);
+        lowerTexts.remove(component);
     }
 
     private boolean matchesUncached(CorrectChatConfig.ChatTab tab, Component component, ChatWorkspace.Kind kind,
@@ -85,14 +92,18 @@ final class ChatRouting {
         String text = component.getString();
         if (matchesExplicitRoute(tab, component, text, kind)) return true;
         if (hasExplicitRoute(component, text, kind, allTabs)) return false;
-        return tab.filters.stream().anyMatch(filter -> matchesFilter(filter, component, text, kind));
+        return matchesFilters(tab, component, text, kind);
     }
 
     String detectedMod(Component component, List<CorrectChatConfig.ChatTab> tabs) {
+        Set<String> checked = new HashSet<>();
         for (CorrectChatConfig.ChatTab tab : tabs) {
             for (CorrectChatConfig.TabFilter filter : tab.filters) {
-                if (filter.type == CorrectChatConfig.TabType.MOD && modMatches(component, filter.value, 0)) {
-                    return filter.value.trim().toLowerCase(Locale.ROOT);
+                if (filter.type == CorrectChatConfig.TabType.MOD) {
+                    String normalized = filter.value.trim().toLowerCase(Locale.ROOT);
+                    if (!normalized.isEmpty() && checked.add(normalized) && modMatches(component, normalized, 0)) {
+                        return normalized;
+                    }
                 }
             }
         }
@@ -134,7 +145,13 @@ final class ChatRouting {
     static boolean modMatches(Component component, String modId, int depth) {
         if (component == null || modId == null || modId.isBlank() || depth > 16) return false;
         String normalized = modId.trim().toLowerCase(Locale.ROOT);
+        return modMatchesNormalized(component, normalized, depth);
+    }
+
+    private static boolean modMatchesNormalized(Component component, String normalized, int depth) {
+        if (component == null || depth > 16) return false;
         if (depth == 0) {
+            if (ModCatalog.matches(normalized, component)) return true;
             String text = component.getString().toLowerCase(Locale.ROOT);
             if (normalized.equals("coreprotect") && text.contains("coreprotect")) return true;
             if (normalized.equals("vulcan") && (text.contains("vulcan")
@@ -151,11 +168,11 @@ final class ChatRouting {
                     || normalized.equals("worldedit") && (translationKeyMatches(translatable.getKey(), "fawe")
                     || translationKeyMatches(translatable.getKey(), "fastasyncworldedit"))) return true;
             for (Object argument : translatable.getArgs()) {
-                if (argument instanceof Component nested && modMatches(nested, normalized, depth + 1)) return true;
+                if (argument instanceof Component nested && modMatchesNormalized(nested, normalized, depth + 1)) return true;
             }
         }
         for (Component sibling : component.getSiblings()) {
-            if (modMatches(sibling, normalized, depth + 1)) return true;
+            if (modMatchesNormalized(sibling, normalized, depth + 1)) return true;
         }
         return false;
     }
@@ -168,7 +185,9 @@ final class ChatRouting {
             case SYSTEM -> kind == ChatWorkspace.Kind.SYSTEM;
             case TWITCH -> kind == ChatWorkspace.Kind.TWITCH;
             case CONTAINS -> !filter.value.isBlank()
-                    && text.toLowerCase(Locale.ROOT).contains(filter.value.toLowerCase(Locale.ROOT));
+                    && lowerTexts.computeIfAbsent(component, ignored -> text.toLowerCase(Locale.ROOT))
+                    .contains(filter.value.toLowerCase(Locale.ROOT));
+            case EQUALS -> !filter.value.isBlank() && text.equalsIgnoreCase(filter.value);
             case REGEX -> !filter.value.isBlank() && regexMatches(filter.value, text);
             case MOD -> {
                 String sourceMod = componentMods.get(component);
@@ -176,6 +195,15 @@ final class ChatRouting {
                         || sourceMod != null && sourceMod.equalsIgnoreCase(filter.value.trim());
             }
         };
+    }
+
+    private boolean matchesFilters(CorrectChatConfig.ChatTab tab, Component component, String text,
+                                   ChatWorkspace.Kind kind) {
+        if (tab.filters.isEmpty()) return false;
+        if (tab.filterRule == CorrectChatConfig.FilterRule.AND) {
+            return tab.filters.stream().allMatch(filter -> matchesFilter(filter, component, text, kind));
+        }
+        return tab.filters.stream().anyMatch(filter -> matchesFilter(filter, component, text, kind));
     }
 
     private boolean hasExplicitRoute(Component component, String text, ChatWorkspace.Kind kind,
@@ -186,25 +214,17 @@ final class ChatRouting {
     private boolean matchesExplicitRoute(CorrectChatConfig.ChatTab tab, Component component, String text,
                                          ChatWorkspace.Kind kind) {
         if (tab.routingRules.stream().anyMatch(rule -> regexMatches(rule, text))) return true;
-        return tab.filters.stream().anyMatch(filter -> matchesExplicitFilter(filter, component, text, kind));
+        if (tab.filterRule == CorrectChatConfig.FilterRule.AND) {
+            boolean hasExplicitFilter = tab.filters.stream().anyMatch(this::isExplicitFilter);
+            return hasExplicitFilter && matchesFilters(tab, component, text, kind);
+        }
+        return tab.filters.stream().anyMatch(filter -> isExplicitFilter(filter)
+                && matchesFilter(filter, component, text, kind));
     }
 
-    private boolean matchesExplicitFilter(CorrectChatConfig.TabFilter filter, Component component, String text,
-                                          ChatWorkspace.Kind kind) {
-        return switch (filter.type) {
-            // Dedicated non-player streams must not leak into the catch-all tab.
-            case SYSTEM -> kind == ChatWorkspace.Kind.SYSTEM;
-            case TWITCH -> kind == ChatWorkspace.Kind.TWITCH;
-            case REGEX -> !filter.value.isBlank() && regexMatches(filter.value, text);
-            case CONTAINS -> !filter.value.isBlank()
-                    && text.toLowerCase(Locale.ROOT).contains(filter.value.toLowerCase(Locale.ROOT));
-            case MOD -> {
-                String sourceMod = componentMods.get(component);
-                yield modMatches(component, filter.value, 0)
-                        || sourceMod != null && sourceMod.equalsIgnoreCase(filter.value.trim());
-            }
-            default -> false;
-        };
+    private boolean isExplicitFilter(CorrectChatConfig.TabFilter filter) {
+        // Dedicated or content-specific streams must not leak into the catch-all tab.
+        return filter.type != CorrectChatConfig.TabType.ALL && filter.type != CorrectChatConfig.TabType.PLAYER;
     }
 
     private static boolean hasVulcanClickAction(Component component, int depth) {

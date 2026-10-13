@@ -8,12 +8,19 @@ import java.util.regex.Pattern;
 public record MessageRuleSuggestion(String message, String player, String playerRegex, String formatRegex) {
     private static final Pattern PLAYER_BEFORE_LAST_SEPARATOR = Pattern.compile(
             "([~+@]?[A-Za-z0-9_]{1,17})\\s*(?=[>»›:→]\\s+[^>»›:→]*$)");
-    private static final Pattern BODY_SEPARATOR = Pattern.compile("\\s([»›:→])\\s+");
+    private static final Pattern BODY_SEPARATOR = Pattern.compile("[>»›:→]\\s+");
+    private static final Pattern CLOCK = Pattern.compile(
+            "(?:\\[\\s*)?(?<!\\d)\\d{1,2}:\\d{2}(?::\\d{2})?(?!\\d)(?:\\s*])?");
     private static final Pattern TOKEN = Pattern.compile("\\d{1,2}:\\d{2}(?::\\d{2})?|\\d+|\\s+");
 
     public static MessageRuleSuggestion from(String rawMessage) {
+        return from(rawMessage, java.util.List.of());
+    }
+
+    public static MessageRuleSuggestion from(String rawMessage, Iterable<String> knownPlayers) {
         String message = rawMessage == null ? "" : rawMessage.strip();
         String player = detectPlayer(message);
+        if (player.isEmpty()) player = detectKnownPlayer(message, knownPlayers);
         String playerRule = player.isEmpty()
                 ? Pattern.quote(message)
                 : "(?i)^.*(?:<|\\||»|›|\\s)[~+@]?" + Pattern.quote(player)
@@ -30,6 +37,17 @@ public record MessageRuleSuggestion(String message, String player, String player
         return result.matches("[A-Za-z0-9_]{1,16}") ? result : "";
     }
 
+    private static String detectKnownPlayer(String message, Iterable<String> knownPlayers) {
+        String best = "";
+        for (String candidate : knownPlayers) {
+            if (candidate == null || !candidate.matches("[A-Za-z0-9_]{1,16}")) continue;
+            if (candidate.length() <= best.length()) continue;
+            Pattern bounded = Pattern.compile("(?i)(?<![A-Za-z0-9_])" + Pattern.quote(candidate) + "(?![A-Za-z0-9_])");
+            if (bounded.matcher(message).find()) best = candidate;
+        }
+        return best;
+    }
+
     public String suggestedTabName() {
         return player.isEmpty() ? "Nachrichtenart" : player;
     }
@@ -40,44 +58,67 @@ public record MessageRuleSuggestion(String message, String player, String player
 
     private static String buildFormatRegex(String message, String player) {
         Matcher separatorMatcher = BODY_SEPARATOR.matcher(message);
-        int split = -1;
-        String separator = "»";
+        int contentStart = -1;
         while (separatorMatcher.find()) {
-            split = separatorMatcher.start(1);
-            separator = separatorMatcher.group(1);
+            contentStart = separatorMatcher.end();
         }
-        if (split < 0) return Pattern.quote(message);
-        String prefix = message.substring(0, split);
-        StringBuilder result = new StringBuilder("(?i)^\\s*");
-        Matcher tokenMatcher = TOKEN.matcher(prefix);
+        String content;
+        if (contentStart >= 0 && contentStart < message.length()) {
+            content = message.substring(contentStart);
+        } else {
+            content = contentWithoutVolatilePrefix(message, player);
+        }
+        return buildContentRegex(content);
+    }
+
+    /** Builds a find-expression from message content only; chat prefix, clock and player are absent. */
+    private static String buildContentRegex(String content) {
+        String normalized = longestSegmentWithoutClock(content);
+        if (normalized.isEmpty()) return "(?!)";
+        StringBuilder result = new StringBuilder("(?i)");
+        Matcher tokenMatcher = TOKEN.matcher(normalized);
         int cursor = 0;
         while (tokenMatcher.find()) {
-            appendLiteralOrPlayer(result, prefix.substring(cursor, tokenMatcher.start()), player);
+            appendLiteral(result, normalized.substring(cursor, tokenMatcher.start()));
             String token = tokenMatcher.group();
             if (token.isBlank()) result.append("\\s+");
-            else if (token.indexOf(':') >= 0) result.append("\\d{1,2}:\\d{2}(?::\\d{2})?");
             else result.append("\\d+");
             cursor = tokenMatcher.end();
         }
-        appendLiteralOrPlayer(result, prefix.substring(cursor), player);
-        result.append("\\s*").append(Pattern.quote(separator)).append("\\s+.*$");
+        appendLiteral(result, normalized.substring(cursor));
         return result.toString();
     }
 
-    private static void appendLiteralOrPlayer(StringBuilder result, String text, String player) {
-        if (text.isEmpty()) return;
-        if (player.isEmpty()) {
-            result.append(Pattern.quote(text));
-            return;
+    private static String contentWithoutVolatilePrefix(String message, String player) {
+        String withoutClock = message;
+        if (!player.isEmpty()) {
+            Matcher playerMatcher = Pattern.compile("(?i)(?<![A-Za-z0-9_])[~+@]?" + Pattern.quote(player)
+                    + "(?![A-Za-z0-9_])").matcher(withoutClock);
+            if (playerMatcher.find()) {
+                String beforePlayer = withoutClock.substring(0, playerMatcher.start()).strip();
+                String afterPlayer = withoutClock.substring(playerMatcher.end())
+                        .replaceFirst("^\\s*(?:[>»›:→|.-]+\\s*)?", "").strip();
+                return afterPlayer.length() >= beforePlayer.length() ? afterPlayer : beforePlayer;
+            }
         }
-        Pattern playerPattern = Pattern.compile("(?i)[~+@]?" + Pattern.quote(player));
-        Matcher matcher = playerPattern.matcher(text);
+        return withoutClock.strip();
+    }
+
+    private static String longestSegmentWithoutClock(String content) {
+        Matcher matcher = CLOCK.matcher(content);
+        String longest = "";
         int cursor = 0;
         while (matcher.find()) {
-            if (matcher.start() > cursor) result.append(Pattern.quote(text.substring(cursor, matcher.start())));
-            result.append("[~+@]?[A-Za-z0-9_]{1,16}");
+            String segment = content.substring(cursor, matcher.start()).strip();
+            if (segment.length() > longest.length()) longest = segment;
             cursor = matcher.end();
         }
-        if (cursor < text.length()) result.append(Pattern.quote(text.substring(cursor)));
+        String tail = content.substring(cursor).strip();
+        if (tail.length() > longest.length()) longest = tail;
+        return longest;
+    }
+
+    private static void appendLiteral(StringBuilder result, String text) {
+        if (!text.isEmpty()) result.append(Pattern.quote(text));
     }
 }
